@@ -1,0 +1,192 @@
+---
+title: "DATA 621: Home Work 01"
+author: "Forhad Akbar"
+date: "02/26/2021"
+output:
+  rmdformats::readthedown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Libraries  
+
+```{r, eval=TRUE, message=FALSE, warning=FALSE}
+library(knitr)
+library(tidyverse)
+library(reshape2)
+library(VIM)
+library(corrplot)
+library(naniar)
+```
+
+
+# Data 
+
+In this homework assignment, we are asked to  explore, analyze and model a baseball data set containing approximately 2200 records. Each record represents a professional baseball team from the years 1871 to 2006 inclusive. Each record has the performance of the team for the given year, with all of the statistics adjusted to match the performance of a 162 game season.   
+
+Our objective is to build a multiple linear regression model on the training data to predict the number of wins for the team based on the variables given or variables that derive from the variables provided. Below is a short description of the variables of interest in the data set:
+
+```{r message=FALSE, echo=F, out.width='90%', fig.show='hold'}
+knitr::include_graphics('./variable_description.jpg')
+```
+
+
+# Load Data
+
+```{r}
+train <- read.csv('./moneyball-training-data.csv')
+test <- read.csv('./moneyball-evaluation-data.csv')
+
+#Removing the index variable
+train$INDEX <- NULL
+test$INDEX <- NULL
+```
+
+```{r}
+head(train)
+```
+
+
+The train data set has 2276 records with 17 variables.
+
+```{r}
+str(train)
+```
+All the variables are integer and TEAM_BATTING_HBP has a lot of missing values. Let's look at the summary of the data.
+
+```{r}
+summary(train)
+```
+```{r message=F, warning=F}
+g = melt(train)
+ggplot(g, aes(x= value)) + 
+   geom_density(fill='blue') + 
+   facet_wrap(~variable, scales = 'free') +
+   theme_light()
+```
+
+Check for rows with missing values
+
+```{r message=F, warning=F}
+sum(complete.cases(train))
+```
+Check how many rows with missing values in terms of percentage
+
+```{r message=F, warning=F}
+sum(complete.cases(train))/(nrow(train)) *100
+```
+
+
+```{r message=F, warning=F}
+missing_plot <- aggr(train, col=c('blue','red'),numbers=TRUE, sortVars=TRUE,labels=names(train), cex.axis=.7,gap=3, ylab=c("Missing data","Pattern"))
+```
+
+Six of the variable has missing values.  
+
+# Outliers
+
+```{r, message=FALSE,warning=FALSE, fig.width=10, fig.height= 9}
+ggplot(stack(train[,-1]), aes(x = ind, y = values, fill=ind)) + 
+  geom_boxplot(outlier.colour = "red",  outlier.alpha=.3) +
+  coord_cartesian(ylim = c(0, 1000)) +
+  theme_light()+
+  theme(axis.text.x=element_text(angle=45, hjust=1)) 
+  
+```
+
+# Correlations 
+
+```{r message=FALSE, warning=FALSE,fig.width=10, fig.height= 9}
+train %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+```
+
+
+
+# Data Preparation
+
+Let's remove TEAM_BATTING_HBP as it has 91.6% missing values
+
+```{r}
+train <- train[-10]
+```
+
+We will investigate missing data using naniar package in order to see if we should remove missing data.
+
+https://www.rdocumentation.org/packages/naniar/versions/0.6.0
+
+```{r message=FALSE, warning=FALSE,fig.width=10, fig.height= 9}
+vis_miss(train)
+```
+
+
+```{r}
+gg_miss_var(train)
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+gg_miss_upset(train, 
+              nsets = 5,
+              nintersects = NA)
+gg_miss_case(train)+
+  theme_classic()
+```
+
+Let's replace extreme outliers with median
+
+```{r}
+train1 <- train %>% mutate(TEAM_PITCHING_H = ifelse(TEAM_PITCHING_H > 5000, median(TEAM_PITCHING_H), TEAM_PITCHING_H),
+                            TEAM_PITCHING_SO = ifelse(TEAM_PITCHING_SO > 1500, median(TEAM_PITCHING_SO), TEAM_PITCHING_SO))
+
+test1 <- test %>% mutate(TEAM_PITCHING_H = ifelse(TEAM_PITCHING_H > 5000, median(TEAM_PITCHING_H), TEAM_PITCHING_H),
+                            TEAM_PITCHING_SO = ifelse(TEAM_PITCHING_SO > 1500, median(TEAM_PITCHING_SO), TEAM_PITCHING_SO))
+
+```
+
+
+Replace missing values with median
+
+```{r}
+train1[] <- lapply(train1, function(x) ifelse(is.na(x), median(x, na.rm=TRUE), x))
+test1[] <- lapply(test1, function(x) ifelse(is.na(x), median(x, na.rm=TRUE), x))
+
+```
+
+```{r}
+# Check missing values
+nrow(is.na(train1))
+nrow(is.na(test1))
+```
+
+
+
+# Model 1 
+
+
+
+
+```{r}
+model1 <- lm(TARGET_WINS ~ ., data = train1)
+
+summary(model1)
+```
+  
+Let's take most significant variables and run the model again to see if we can improve  adjusted R-squared
+
+```{r}
+
+model1 <- lm(TARGET_WINS ~ TEAM_BATTING_H+TEAM_BATTING_3B+TEAM_BASERUN_SB+TEAM_PITCHING_H+TEAM_FIELDING_E+TEAM_FIELDING_DP, data = train1)
+
+summary(model1)
+
+```
+
+
+
+
