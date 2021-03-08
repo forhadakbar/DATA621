@@ -1,0 +1,1101 @@
+---
+title: "Data_621_Homework1"
+author: "Group 1"
+output: pdf_document
+---
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80), tidy=TRUE)
+
+my.summary.lm = function (x, digits = max(3L, getOption("digits") - 3L), 
+                       symbolic.cor = x$symbolic.cor, 
+                       signif.stars = getOption("show.signif.stars"), 
+                       my.rows, ...)                     # NOTE NEW my.rows ARGUMENT
+{
+  cat("\nCall:\n", paste(deparse(x$call), sep = "\n", collapse = "\n"), 
+      "\n\n", sep = "")
+  resid <- x$residuals
+  df <- x$df
+  rdf <- df[2L]
+  cat(if (!is.null(x$weights) && diff(range(x$weights))) 
+    "Weighted ", "Residuals:\n", sep = "")
+  if (rdf > 5L) {
+    nam <- c("Min", "1Q", "Median", "3Q", "Max")
+    rq <- if (length(dim(resid)) == 2L) 
+      structure(apply(t(resid), 1L, quantile), dimnames = list(nam, 
+                                                               dimnames(resid)[[2L]]))
+    else {
+      zz <- zapsmall(quantile(resid), digits + 1L)
+      structure(zz, names = nam)
+    }
+    print(rq, digits = digits, ...)
+  }
+  else if (rdf > 0L) {
+    print(resid, digits = digits, ...)
+  }
+  else {
+    cat("ALL", df[1L], "residuals are 0: no residual degrees of freedom!")
+    cat("\n")
+  }
+  if (length(x$aliased) == 0L) {
+    cat("\nNo Coefficients\n")
+  }
+  else {
+    if (nsingular <- df[3L] - df[1L]) 
+      cat("\nCoefficients: (", nsingular, " not defined because of singularities)\n", 
+          sep = "")
+    else cat("\nCoefficients:\n")
+    coefs <- x$coefficients[my.rows,]                      # SUBSET my.rows
+    if (!is.null(aliased <- x$aliased) && any(aliased)) {
+      cn <- names(aliased)
+      coefs <- matrix(NA, length(aliased), 4, dimnames = list(cn, 
+                                                              colnames(coefs)))
+      coefs[!aliased, ] <- x$coefficients
+    }
+    printCoefmat(coefs, digits = digits, signif.stars = signif.stars, 
+                 na.print = "NA", ...)
+  }
+  cat("\nResidual standard error:", format(signif(x$sigma, 
+                                                  digits)), "on", rdf, "degrees of freedom")
+  cat("\n")
+  if (nzchar(mess <- naprint(x$na.action))) 
+    cat("  (", mess, ")\n", sep = "")
+  if (!is.null(x$fstatistic)) {
+    cat("Multiple R-squared: ", formatC(x$r.squared, digits = digits))
+    cat(",\tAdjusted R-squared: ", formatC(x$adj.r.squared, 
+                                           digits = digits), "\nF-statistic:", formatC(x$fstatistic[1L], 
+                                                                                       digits = digits), "on", x$fstatistic[2L], "and", 
+        x$fstatistic[3L], "DF,  p-value:", format.pval(pf(x$fstatistic[1L], 
+                                                          x$fstatistic[2L], x$fstatistic[3L], lower.tail = FALSE), 
+                                                       digits = digits))
+    cat("\n")
+  }
+  correl <- x$correlation
+  if (!is.null(correl)) {
+    p <- NCOL(correl)
+    if (p > 1L) {
+      cat("\nCorrelation of Coefficients:\n")
+      if (is.logical(symbolic.cor) && symbolic.cor) {
+        print(symnum(correl, abbr.colnames = NULL))
+      }
+      else {
+        correl <- format(round(correl, 2), nsmall = 2, 
+                         digits = digits)
+        correl[!lower.tri(correl)] <- ""
+        print(correl[-1, -p, drop = FALSE], quote = FALSE)
+      }
+    }
+  }
+  cat("\n")
+  invisible(x)
+}
+```
+
+
+# Objective
+
+In this homework assignment, you will explore, analyze and model a data set containing approximately 2200 records. Each record represents a professional baseball team from the years 1871 to 2006 inclusive. Each record has the performance of the team for the given year, with all of the statistics adjusted to match the performance of a 162 game season.  
+
+Your objective is to build a multiple linear regression model on the training data to predict the number of wins for the team. You can only use the variables given to you (or variables that you derive from the variables provided). Below is a short description of the variables of interest in the data set:
+
+# Load Packages
+
+Run the below cell to laod the packges needed to use the notebook. Please note not all of the packages are included in base R so you may need to install some packages before running the code. 
+
+```{r, eval=TRUE, message=FALSE, warning=FALSE}
+# Data Prep Libraries
+library(knitr)
+library(tidyverse)
+library(reshape2)
+library(naniar)
+library(skimr)
+
+# Modeling Libraries
+library(fastDummies)
+library(funModeling)
+library(caret)
+library(MASS)
+
+# Data Visaulization Libraries
+library(corrplot)
+library(ggplot2)
+library(VIM)
+library(GGally)
+library(gridExtra)
+```
+
+\newpage
+
+# Exploratory Data Analysis
+**Code Author: Forhad Akbar**
+
+The below cells are for the intent of exploring the relationships that exist within the data. The training data contains data for 2,276 baseball teams with 16 features and one target variable. We explore the various relationships and statistics using a number of different plots. Some of the struggles we see with this data set is the amount of missing data and the effect outliers have on the models. Over the next couple cells we will examine that information and show you what we did to deal with that later on in the modeling development section.
+
+```{r include=FALSE}
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=20), tidy=TRUE)
+train <-read.csv("https://raw.githubusercontent.com/ChristopherBloome/621/main/moneyball-training-data.csv")
+test <- read.csv("https://raw.githubusercontent.com/ChristopherBloome/621/main/moneyball-evaluation-data.csv")
+
+#Removing the index variable
+train$INDEX <- NULL
+test$INDEX <- NULL
+```
+
+**Investigate Summary Statistics**
+
+```{r}
+summary(train)
+```
+
+**Check Data Distribution**
+
+```{r message=F, warning=F, fig.width=7, fig.height= 7}
+g = melt(train)
+ggplot(g, aes(x= value)) + 
+   geom_density(fill='blue') + 
+   facet_wrap(~variable, scales = 'free') +
+   theme_light()
+```
+
+
+**Look at Correltions between variable**
+
+```{r message=FALSE, warning=FALSE,fig.width=8, fig.height= 7}
+train %>% 
+  cor(., use = "complete.obs") %>%
+  corrplot(., method = "color", type = "upper", tl.col = "black", tl.cex=.8, diag = FALSE)
+```
+
+**Explore the outliers**
+
+```{r, message=FALSE,warning=FALSE, fig.width=6, fig.height= 6}
+ggplot(stack(train[,-1]), aes(x = ind, y = values, fill=ind)) + 
+  geom_boxplot(outlier.colour = "red",  outlier.alpha=.3) +
+  coord_cartesian(ylim = c(0, 1000)) +
+  theme_light()+
+  theme(axis.text.x=element_text(angle=45, hjust=1)) 
+```
+
+
+**Plot Missing Data**
+
+```{r, message=FALSE,warning=FALSE}
+missing_plot <- aggr(train, col=c('blue','red'),numbers=TRUE, sortVars=TRUE,labels=names(train), cex.axis=.7,gap=3, ylab=c("Missing data","Pattern"))
+```
+
+\newpage
+
+# Model Development
+
+The below cells go through three different modeling methods and the result of each. Each method contains slightly different ways of preparing the data and we explore the impact that has on our evaluation metric R<sup>2</sup>. The reason we chose to use R<sup>2</sup> is to compare the results of the model across these different approaches.
+
+## Method 1
+**Code Author: Christopher Bloome**  
+
+This method cleans the data in a way where the missing data is imputed with the median and focusses on feature engineering. Over the next few cells you will look at a bunch of different features that were created from the existing one and then fit a linear model, and comparing the results.
+
+### Data Prep
+
+```{r}
+# Remove TEAM_BATTING_HBP as it has 91.6% missing values
+method1_train <- train[-10]
+
+# Replace extreme outliers with median
+method1_train <- method1_train %>% mutate(TEAM_PITCHING_H = ifelse(TEAM_PITCHING_H > 5000, median(TEAM_PITCHING_H), TEAM_PITCHING_H),
+                            TEAM_PITCHING_SO = ifelse(TEAM_PITCHING_SO > 1500, median(TEAM_PITCHING_SO), TEAM_PITCHING_SO))
+
+method1_test <- test %>% mutate(TEAM_PITCHING_H = ifelse(TEAM_PITCHING_H > 5000, median(TEAM_PITCHING_H), TEAM_PITCHING_H),
+                            TEAM_PITCHING_SO = ifelse(TEAM_PITCHING_SO > 1500, median(TEAM_PITCHING_SO), TEAM_PITCHING_SO))
+
+# Replace missing values with median
+method1_train[] <- lapply(method1_train , function(x) ifelse(is.na(x), median(x, na.rm=TRUE), x))
+method1_test[] <- lapply(method1_test, function(x) ifelse(is.na(x), median(x, na.rm=TRUE), x))
+```
+
+### Feature Engineering
+
+
+Now that we have the data reasonably clean, we can calculate some additional fields that may be of use in our models. 
+
+**SLG 1**
+
+There exists a metric called "Slugging percentage" used by baseball teams in the modern era, that effectively determines the effectiveness of a hitter. This is traditionally calculated as follows: [Singles + Doubles x 2 + Triples x 3 + HRs x 4]/[Plate Appearances]. 
+
+As we do not have Plate Appearances, lets use hits in its place, effectively calculating how many bases a team gets on average each time one of its players gets a hit. 
+
+```{r}
+method1_train$SLG1 <- (method1_train$TEAM_BATTING_H + method1_train$TEAM_BATTING_2B + 2*method1_train$TEAM_BATTING_3B + 3*method1_train$TEAM_BATTING_HR)/method1_train$TEAM_BATTING_H
+```
+
+**SLG 2**
+
+While the above demonstrates the effectiveness of a team at the plate, each of the other statistics are aggregate sums. In that spirit, lets calculate a "slugging total" that is not scaled to the number of hits. 
+
+```{r}
+method1_train$SLG2 <- (method1_train$TEAM_BATTING_H + method1_train$TEAM_BATTING_2B + 2*method1_train$TEAM_BATTING_3B + 3*method1_train$TEAM_BATTING_HR)
+```
+
+**Diffs**
+
+Due to the changes in the way baseball has been played since its inception, aggregate totals may be less predictive them ratios of a team's outcomes vs their opponents. Lets create 3 variables, that measure ratios in this way. 
+
+As we will be building a learning model, we would not want to generate differences by way of subtracting, as they would be deemed redundant later on. 
+
+```{r}
+method1_train$HitDiff <- method1_train$TEAM_BATTING_H/ method1_train$TEAM_PITCHING_H
+
+method1_train$WalkDiff <- method1_train$TEAM_BATTING_BB/ method1_train$TEAM_PITCHING_BB 
+
+method1_train$HRDiff <- method1_train$TEAM_BATTING_HR/method1_train$TEAM_PITCHING_HR
+
+# Change NAs to Median - While NAs are caused by a value of 0 - cases where the denominator are 0 are more likely due to missing data than truly having no Hits, Walks or HRs in a season. 
+
+method1_train[] <- lapply(method1_train, function(x) ifelse(is.na(x), median(x, na.rm=TRUE), x))
+```
+
+**Walk Diff**
+
+Lets start with one of our calculated variables, WalkDiff. This variable will always be between 0 and 1. By taking the squareroot, are vaules remain between 0 and 1, but we effectively compress values such that the better performances become closer together, and worse performances become outliers. This results in a significantly more predictive variable. 
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+#Not Transformed
+p1 <- ggplot(data=method1_train, aes(x=WalkDiff)) + geom_histogram()
+p2 <- ggplot(data=method1_train, aes(x = WalkDiff, y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+WalkDiff_LM = lm(TARGET_WINS ~ WalkDiff, data = method1_train)
+
+WalkDiff_LM_DF <- data.frame(WalkDiff_LM$fitted.values, WalkDiff_LM$residuals)
+names(WalkDiff_LM_DF) <- c("Fitted","Resid")
+
+p3 <- ggplot(data=WalkDiff_LM_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+#sqrt 
+p4 <- ggplot(data=method1_train, aes(x=sqrt(WalkDiff))) + geom_histogram(bins = 50)
+p5 <- ggplot(data=method1_train, aes(x = sqrt(WalkDiff), y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+WalkDiff_LM2 = lm(TARGET_WINS ~ sqrt(WalkDiff), data = method1_train)
+
+WalkDiff_LM2_DF <- data.frame(WalkDiff_LM2$fitted.values, WalkDiff_LM2$residuals)
+names(WalkDiff_LM2_DF) <- c("Fitted","Resid")
+
+p6 <- ggplot(data=WalkDiff_LM2_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 2)
+```
+
+&nbsp;  
+&nbsp;
+
+**TEAM_BATTING_HR**
+
+We see that Home Runs is bi-model in nature, likely due to variation in the way the game has evolved. If we were to subset this data by era, we might see several distinct normal distributions. By taking the Log, we find the bi-model distribution becomes more normal, and that the range changes in a manner more fitting for a linear model. Reviewing our residual plots, we find that before the transformation, we have a much higher degree of variation for lower values. This is largely fixed after the transformation. 
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+#Not Transformed
+p1 <- ggplot(data=method1_train, aes(x=TEAM_BATTING_HR)) + geom_histogram()
+p2 <- ggplot(data=method1_train, aes(x = TEAM_BATTING_HR, y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+TEAM_BATTING_HR_LM = lm(TARGET_WINS ~ TEAM_BATTING_HR, data = method1_train)
+
+TEAM_BATTING_HR_LM_DF <- data.frame(TEAM_BATTING_HR_LM$fitted.values, TEAM_BATTING_HR_LM$residuals)
+names(TEAM_BATTING_HR_LM_DF) <- c("Fitted","Resid")
+
+p3 <- ggplot(data=TEAM_BATTING_HR_LM_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+#Log10 
+p4 <- ggplot(data=method1_train, aes(x=log10(TEAM_BATTING_HR+1))) + geom_histogram()
+p5 <- ggplot(data=method1_train, aes(x = log10(TEAM_BATTING_HR+1), y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+TEAM_BATTING_HR_LM2 = lm(TARGET_WINS ~ log10(TEAM_BATTING_HR+1), data = method1_train)
+
+TEAM_BATTING_HR_LM2_DF <- data.frame(TEAM_BATTING_HR_LM2$fitted.values, TEAM_BATTING_HR_LM2$residuals)
+names(TEAM_BATTING_HR_LM2_DF) <- c("Fitted","Resid")
+
+p6 <- ggplot(data=TEAM_BATTING_HR_LM2_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 2)
+```
+
+&nbsp;  
+&nbsp;
+
+**TEAM_PITCHING_BB**
+
+At first glance, it appears that a log transformation  increases the predictive power of the pitching/walks metric. 
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+#Not Transformed
+p1 <- ggplot(data=method1_train, aes(x=TEAM_PITCHING_BB)) + geom_histogram()
+p2 <- ggplot(data=method1_train, aes(x = TEAM_PITCHING_BB, y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+TEAM_PITCHING_BB_LM = lm(TARGET_WINS ~ TEAM_PITCHING_BB, data = method1_train)
+
+TEAM_PITCHING_BB_LM_DF <- data.frame(TEAM_PITCHING_BB_LM$fitted.values, TEAM_PITCHING_BB_LM$residuals)
+names(TEAM_PITCHING_BB_LM_DF) <- c("Fitted","Resid")
+
+p3 <- ggplot(data=TEAM_PITCHING_BB_LM_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+
+#Log10 
+p4 <- ggplot(data=method1_train, aes(x=log10(TEAM_PITCHING_BB+1))) + geom_histogram()
+p5 <- ggplot(data=method1_train, aes(x = log10(TEAM_PITCHING_BB+1), y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+TEAM_PITCHING_BB_LM2 = lm(TARGET_WINS ~ log10(TEAM_PITCHING_BB+1), data = method1_train)
+
+TEAM_PITCHING_BB_LM2_DF <- data.frame(TEAM_PITCHING_BB_LM2$fitted.values, TEAM_PITCHING_BB_LM2$residuals)
+names(TEAM_PITCHING_BB_LM2_DF) <- c("Fitted","Resid")
+
+p6 <- ggplot(data=TEAM_PITCHING_BB_LM2_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 2)
+```
+
+&nbsp;  
+
+However, after a closer look, we find that this is actually due to the treatment of outliers. Notice the extreme high values before the transformation, and the low value after the transformation. 
+
+We can accomplish an increased level of predictiveness by removing these extremes with the median of the set. It is likely that these are in fact errors in the data. 
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+method1_train <- method1_train %>% mutate(TEAM_PITCHING_BB = ifelse(TEAM_PITCHING_BB > 1300, median(TEAM_PITCHING_BB), TEAM_PITCHING_BB))
+
+method1_train <- method1_train %>% mutate(TEAM_PITCHING_BB = ifelse(TEAM_PITCHING_BB < 20, median(TEAM_PITCHING_BB), TEAM_PITCHING_BB))
+
+#Not Transformed
+p1 <- ggplot(data=method1_train, aes(x=TEAM_PITCHING_BB)) + geom_histogram()
+p2 <- ggplot(data=method1_train, aes(x = TEAM_PITCHING_BB, y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+TEAM_PITCHING_BB_LM = lm(TARGET_WINS ~ TEAM_PITCHING_BB, data = method1_train)
+
+TEAM_PITCHING_BB_LM_DF <- data.frame(TEAM_PITCHING_BB_LM$fitted.values, TEAM_PITCHING_BB_LM$residuals)
+names(TEAM_PITCHING_BB_LM_DF) <- c("Fitted","Resid")
+
+p3 <- ggplot(data=TEAM_PITCHING_BB_LM_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+#Log10 
+p4 <- ggplot(data=method1_train, aes(x=log10(TEAM_PITCHING_BB+1))) + geom_histogram()
+p5 <- ggplot(data=method1_train, aes(x = log10(TEAM_PITCHING_BB+1), y=TARGET_WINS)) + geom_jitter() + geom_smooth(formula= y~x) + geom_smooth(method='lm', formula= y~x)
+TEAM_PITCHING_BB_LM2 = lm(TARGET_WINS ~ log10(TEAM_PITCHING_BB+1), data = method1_train)
+
+TEAM_PITCHING_BB_LM2_DF <- data.frame(TEAM_PITCHING_BB_LM2$fitted.values, TEAM_PITCHING_BB_LM2$residuals)
+names(TEAM_PITCHING_BB_LM2_DF) <- c("Fitted","Resid")
+
+p6 <- ggplot(data=TEAM_PITCHING_BB_LM2_DF, aes(y=Resid, x = Fitted )) + geom_jitter() + geom_smooth(method='lm', formula= y~x)
+
+grid.arrange(p1, p2, p3, p4, p5, p6, nrow = 2)
+```
+
+
+&nbsp;  
+&nbsp;
+
+The log transformation does improve our predictive power but only slightly. 
+
+### Train Model & Evaluate Results
+
+In the end, we learned a few things from this method: 
+
+* We found that higher order hits were generally not predictive, likely due to their rarity. Triples were eliminated, though  HR and the HR ratios remained. 
+
+* While the square root transformation seemed more predictive in our prep, it actually made the model worse and was ultimately removed. 
+
+* The Log transformations and the truncating of Walks proved very effective.
+
+```{r}
+model.1c <- lm(TARGET_WINS~TEAM_BATTING_H+TEAM_BATTING_2B+log10(TEAM_BATTING_HR+1)+TEAM_BATTING_BB+TEAM_PITCHING_H+TEAM_PITCHING_HR+log10(TEAM_PITCHING_BB+1)+TEAM_FIELDING_E + TEAM_BASERUN_SB + TEAM_PITCHING_SO + TEAM_FIELDING_DP + SLG1 + SLG2 + HRDiff  + WalkDiff, data = method1_train)
+
+
+my.summary.lm(summary(model.1c), my.rows=1:4)
+```
+
+\newpage
+
+## Method 2
+
+**Code Author: Adam Gersowitz**
+
+
+This model's approach was to attempt to predict the year that these statistics took place using rates of key statistics that were found on baseball-reference.com. After creating a linear model based on these ratios to predict the year we will then use that model to predict the year of our test dataset. The Year prediction model had an R-squared > 0.96 which indicates it is extremely accurate and can be relied upon to predict the year of our dataset.
+
+Once we have our predicted year we will then create dummy variables based on widely agreed upon eras in the history of baseball. Finally, our model will be based on the interaction of these eras and the counting statistics that were given to us. For example, TEAM_BATTING_HITS*era_modern will produce 0 if the team was not predicted to have played in the modern era but will be the number of hits the team had if they did play in the modern era. This essentially creates features that are "number of hits in the modern era" vs "number of hits". This allows us to get a better understanding of which statistics were more important in which eras.
+
+Reference Links:
+Statistics by year  
+https://www.baseball-reference.com/leagues/MLB/bat.shtml  
+Three True Outcomes  
+https://www.mlb.com/glossary/idioms/three-true-outcomes#:~:text=  
+The%20%22three%20true%20outcomes%22%20in,the%20pitcher%20or%20the%20catcher  
+Eras of Baseball  
+https://thesportjournal.org/article/examining-perceptions-of-baseballs-eras/#  
+:~:text=A%20common%20list%20presented%20at,%2D2005)%20(17)  
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+method2_test <- read_csv("https://raw.githubusercontent.com/agersowitz/DATA-621/main/mb_eval.csv")
+method2_test <- data.frame(eval)
+
+yr <- read_csv("https://raw.githubusercontent.com/agersowitz/DATA-621/main/year%20predict.csv")
+yr <- data.frame(yr)
+
+method2_train <- read_csv("https://raw.githubusercontent.com/agersowitz/DATA-621/main/mb_train.csv")
+method2_train <- data.frame(method2_train)
+
+#Change NA to median where appropriate
+  method2_train<- method2_train %>% replace_na(list(TEAM_BATTING_SO = median(method2_train$TEAM_BATTING_SO[(is.na(method2_train$TEAM_BATTING_SO) == FALSE)]),
+                               TEAM_BASERUN_SB = median(method2_train$TEAM_BASERUN_SB[(is.na(method2_train$TEAM_BASERUN_SB) == FALSE)]),
+                               TEAM_BASERUN_CS = median(method2_train$TEAM_BASERUN_CS[(is.na(method2_train$TEAM_BASERUN_CS) == FALSE)]),
+                               TEAM_PITCHING_SO = median(method2_train$TEAM_PITCHING_SO[(is.na(method2_train$TEAM_PITCHING_SO) == FALSE)]),
+                               TEAM_FIELDING_DP = median(method2_train$TEAM_FIELDING_DP[(is.na(method2_train$TEAM_FIELDING_DP) == FALSE)])
+                               ))
+  
+#Drop column with too many NA
+method2_train$TEAM_BATTING_HBP  <- NULL
+```
+
+### Train Model & Evaluate Results
+
+Baseball, perhaps more than any other sport, is defined by it's eras. These range from a version of the game in the Dead-Ball era that was focused on "small-ball" type plays such as stolen bases, bunts, singles etc. This is drastically different from the modern game which focuses on the 3 true outcomes of the game (home runs, walks, strike outs) as the important counting statistics to focus on. Unfortunately, in our data set there is no indication of the year these statistics took place. this is particularly troubling because the dataset ranges over 100 years of baseball which has seen its fair share of evolution.
+
+```{r build_model}
+method2_train$X2B=(method2_train$TEAM_BATTING_2B/162)
+method2_train$X3B=(method2_train$TEAM_BATTING_3B/162)
+method2_train$BB=((method2_train$TEAM_BATTING_BB/162)+(method2_train$TEAM_PITCHING_BB/162))/2
+method2_train$SO=((method2_train$TEAM_BATTING_SO/162)+(method2_train$TEAM_PITCHING_SO/162))/2
+
+year<-lm(Year ~ X2B+X3B+BB+SO, data = yr)
+
+summary(year)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(year)
+```
+
+
+```{r include=FALSE}
+predicted_year<- predict(year, newdata = method2_train)
+
+method2_train<-cbind(method2_train,predicted_year)
+
+
+
+method2_train$era = ifelse(method2_train$predicted_year>= 1994,"Modern",
+                   ifelse(method2_train$predicted_year> 1977 & method2_train$predicted_year<1993, "FreeAgency",
+                   ifelse(method2_train$predicted_year> 1961 & method2_train$predicted_yea<1976, "Expansion",
+                   ifelse(method2_train$predicted_year> 1942 & method2_train$predicted_yea<1960, "Integration",
+                    ifelse(method2_train$predicted_year> 1920 & method2_train$predicted_yea<1941, "LiveBall",
+                          "DeadBall")))))
+
+method2_train<-dummy_cols(method2_train,select_columns=c("era"))
+
+
+method2_train$H_era_m <- (method2_train$TEAM_BATTING_H)*method2_train$era_Modern
+method2_train$H_era_fa <- (method2_train$TEAM_BATTING_H)*method2_train$era_FreeAgency
+method2_train$H_era_e <- (method2_train$TEAM_BATTING_H)*method2_train$era_Expansion
+method2_train$H_era_i <- (method2_train$TEAM_BATTING_H)*method2_train$era_Integration
+method2_train$H_era_lb <- (method2_train$TEAM_BATTING_H)*method2_train$era_LiveBall
+method2_train$H_era_db <- (method2_train$TEAM_BATTING_H)*method2_train$era_DeadBall
+
+method2_train$H_era_m_p <- (method2_train$TEAM_PITCHING_H)*method2_train$era_Modern
+method2_train$H_era_fa_p <- (method2_train$TEAM_PITCHING_H)*method2_train$era_FreeAgency
+method2_train$H_era_e_p <- (method2_train$TEAM_PITCHING_H)*method2_train$era_Expansion
+method2_train$H_era_i_p <- (method2_train$TEAM_PITCHING_H)*method2_train$era_Integration
+method2_train$H_era_lb_p <- (method2_train$TEAM_PITCHING_H)*method2_train$era_LiveBall
+method2_train$H_era_db_p <- (method2_train$TEAM_PITCHING_H)*method2_train$era_DeadBall
+
+method2_train$bb_era_m <- (method2_train$TEAM_BATTING_BB)*method2_train$era_Modern
+method2_train$bb_era_fa <- (method2_train$TEAM_BATTING_BB)*method2_train$era_FreeAgency
+method2_train$bb_era_e <- (method2_train$TEAM_BATTING_BB)*method2_train$era_Expansion
+method2_train$bb_era_i <- (method2_train$TEAM_BATTING_BB)*method2_train$era_Integration
+method2_train$bb_era_lb <- (method2_train$TEAM_BATTING_BB)*method2_train$era_LiveBall
+method2_train$bb_era_db <- (method2_train$TEAM_BATTING_BB)*method2_train$era_DeadBall
+
+method2_train$bb_era_m_p <- (method2_train$TEAM_PITCHING_BB)*method2_train$era_Modern
+method2_train$bb_era_fa_p <- (method2_train$TEAM_PITCHING_BB)*method2_train$era_FreeAgency
+method2_train$bb_era_e_p <- (method2_train$TEAM_PITCHING_BB)*method2_train$era_Expansion
+method2_train$bb_era_i_p <- (method2_train$TEAM_PITCHING_BB)*method2_train$era_Integration
+method2_train$bb_era_lb_p <- (method2_train$TEAM_PITCHING_BB)*method2_train$era_LiveBall
+method2_train$bb_era_db_p <- (method2_train$TEAM_PITCHING_BB)*method2_train$era_DeadBall
+
+method2_train$hr_era_m <- (method2_train$TEAM_BATTING_HR)*method2_train$era_Modern
+method2_train$hr_era_fa <- (method2_train$TEAM_BATTING_HR)*method2_train$era_FreeAgency
+method2_train$hr_era_e <- (method2_train$TEAM_BATTING_HR)*method2_train$era_Expansion
+method2_train$hr_era_i <- (method2_train$TEAM_BATTING_HR)*method2_train$era_Integration
+method2_train$hr_era_lb <- (method2_train$TEAM_BATTING_HR)*method2_train$era_LiveBall
+method2_train$hr_era_db <- (method2_train$TEAM_BATTING_HR)*method2_train$era_DeadBall
+
+method2_train$hr_era_m_p <- (method2_train$TEAM_PITCHING_HR)*method2_train$era_Modern
+method2_train$hr_era_fa_p <- (method2_train$TEAM_PITCHING_HR)*method2_train$era_FreeAgency
+method2_train$hr_era_e_p <- (method2_train$TEAM_PITCHING_HR)*method2_train$era_Expansion
+method2_train$hr_era_i_p <- (method2_train$TEAM_PITCHING_HR)*method2_train$era_Integration
+method2_train$hr_era_lb_p <- (method2_train$TEAM_PITCHING_HR)*method2_train$era_LiveBall
+method2_train$hr_era_db_p <- (method2_train$TEAM_PITCHING_HR)*method2_train$era_DeadBall
+
+method2_train$so_era_m <- (method2_train$TEAM_BATTING_SO)*method2_train$era_Modern
+method2_train$so_era_fa <- (method2_train$TEAM_BATTING_SO)*method2_train$era_FreeAgency
+method2_train$so_era_e <- (method2_train$TEAM_BATTING_SO)*method2_train$era_Expansion
+method2_train$so_era_i <- (method2_train$TEAM_BATTING_SO)*method2_train$era_Integration
+method2_train$so_era_lb <- (method2_train$TEAM_BATTING_SO)*method2_train$era_LiveBall
+method2_train$so_era_db <- (method2_train$TEAM_BATTING_SO)*method2_train$era_DeadBall
+
+method2_train$so_era_m_p <- (method2_train$TEAM_PITCHING_SO)*method2_train$era_Modern
+method2_train$so_era_fa_p <- (method2_train$TEAM_PITCHING_SO)*method2_train$era_FreeAgency
+method2_train$so_era_e_p <- (method2_train$TEAM_PITCHING_SO)*method2_train$era_Expansion
+method2_train$so_era_i_p <- (method2_train$TEAM_PITCHING_SO)*method2_train$era_Integration
+method2_train$so_era_lb_p <- (method2_train$TEAM_PITCHING_SO)*method2_train$era_LiveBall
+method2_train$so_era_db_p <- (method2_train$TEAM_PITCHING_SO)*method2_train$era_DeadBall
+
+method2_train$x2b_era_m <- (method2_train$TEAM_BATTING_2B)*method2_train$era_Modern
+method2_train$x2b_era_fa <- (method2_train$TEAM_BATTING_2B)*method2_train$era_FreeAgency
+method2_train$x2b_era_e <- (method2_train$TEAM_BATTING_2B)*method2_train$era_Expansion
+method2_train$x2b_era_i <- (method2_train$TEAM_BATTING_2B)*method2_train$era_Integration
+method2_train$x2b_era_lb <- (method2_train$TEAM_BATTING_2B)*method2_train$era_LiveBall
+method2_train$x2b_era_db <- (method2_train$TEAM_BATTING_2B)*method2_train$era_DeadBall
+
+method2_train$x3b_era_m <- (method2_train$TEAM_BATTING_3B)*method2_train$era_Modern
+method2_train$x3b_era_fa <- (method2_train$TEAM_BATTING_3B)*method2_train$era_FreeAgency
+method2_train$x3b_era_e <- (method2_train$TEAM_BATTING_3B)*method2_train$era_Expansion
+method2_train$x3b_era_i <- (method2_train$TEAM_BATTING_3B)*method2_train$era_Integration
+method2_train$x3b_era_lb <- (method2_train$TEAM_BATTING_3B)*method2_train$era_LiveBall
+method2_train$x3b_era_db <- (method2_train$TEAM_BATTING_3B)*method2_train$era_DeadBall
+
+method2_train$sb_era_m <- (method2_train$TEAM_BASERUN_SB)*method2_train$era_Modern
+method2_train$sb_era_fa <- (method2_train$TEAM_BASERUN_SB)*method2_train$era_FreeAgency
+method2_train$sb_era_e <- (method2_train$TEAM_BASERUN_SB)*method2_train$era_Expansion
+method2_train$sb_era_i <- (method2_train$TEAM_BASERUN_SB)*method2_train$era_Integration
+method2_train$sb_era_lb <- (method2_train$TEAM_BASERUN_SB)*method2_train$era_LiveBall
+method2_train$sb_era_db <- (method2_train$TEAM_BASERUN_SB)*method2_train$era_DeadBall
+
+method2_train$cs_era_m <- (method2_train$TEAM_BASERUN_CS)*method2_train$era_Modern
+method2_train$cs_era_fa <- (method2_train$TEAM_BASERUN_CS)*method2_train$era_FreeAgency
+method2_train$cs_era_e <- (method2_train$TEAM_BASERUN_CS)*method2_train$era_Expansion
+method2_train$cs_era_i <- (method2_train$TEAM_BASERUN_CS)*method2_train$era_Integration
+method2_train$cs_era_lb <- (method2_train$TEAM_BASERUN_CS)*method2_train$era_LiveBall
+method2_train$cs_era_db <- (method2_train$TEAM_BASERUN_CS)*method2_train$era_DeadBall
+
+
+method2_train$e_era_m <- (method2_train$TEAM_FIELDING_E)*method2_train$era_Modern
+method2_train$e_era_fa <- (method2_train$TEAM_FIELDING_E)*method2_train$era_FreeAgency
+method2_train$e_era_e <- (method2_train$TEAM_FIELDING_E)*method2_train$era_Expansion
+method2_train$e_era_i <- (method2_train$TEAM_FIELDING_E)*method2_train$era_Integration
+method2_train$e_era_lb <- (method2_train$TEAM_FIELDING_E)*method2_train$era_LiveBall
+method2_train$e_era_db <- (method2_train$TEAM_FIELDING_E)*method2_train$era_DeadBall
+
+
+method2_train$dp_era_m <- (method2_train$TEAM_FIELDING_DP)*method2_train$era_Modern
+method2_train$dp_era_fa <- (method2_train$TEAM_FIELDING_DP)*method2_train$era_FreeAgency
+method2_train$dp_era_e <- (method2_train$TEAM_FIELDING_DP)*method2_train$era_Expansion
+method2_train$dp_era_i <- (method2_train$TEAM_FIELDING_DP)*method2_train$era_Integration
+method2_train$dp_era_lb <- (method2_train$TEAM_FIELDING_DP)*method2_train$era_LiveBall
+method2_train$dp_era_db <- (method2_train$TEAM_FIELDING_DP)*method2_train$era_DeadBall
+
+
+
+era<-lm(TARGET_WINS ~ H_era_m+H_era_fa+H_era_e+H_era_i+H_era_lb+H_era_db+
+                      H_era_m_p+H_era_fa_p+H_era_e_p+H_era_i_p+H_era_lb_p+H_era_db_p+
+          
+                      bb_era_m+bb_era_fa+bb_era_e+bb_era_i+bb_era_lb+bb_era_db+
+                      bb_era_m_p+bb_era_fa_p+bb_era_e_p+bb_era_i_p+bb_era_lb_p+bb_era_db_p+
+          
+                      hr_era_m+hr_era_fa+hr_era_e+hr_era_i+hr_era_lb+hr_era_db+
+                      hr_era_m_p+hr_era_fa_p+hr_era_e_p+hr_era_i_p+hr_era_lb_p+hr_era_db_p+
+          
+                      so_era_m+so_era_fa+so_era_e+so_era_i+so_era_lb+so_era_db+
+                      so_era_m_p+so_era_fa_p+so_era_e_p+so_era_i_p+so_era_lb_p+so_era_db_p+
+          
+                      x2b_era_m+x2b_era_fa+x2b_era_e+x2b_era_i+x2b_era_lb+x2b_era_db+
+          
+                      x3b_era_m+x3b_era_fa+x3b_era_e+x3b_era_i+x3b_era_lb+x3b_era_db+
+          
+                      e_era_m+e_era_fa+e_era_e+e_era_i+e_era_lb+e_era_db+
+          
+                      dp_era_m+dp_era_fa+dp_era_e+dp_era_i+dp_era_lb+dp_era_db+
+          
+                      sb_era_m+sb_era_fa+sb_era_e+sb_era_i+sb_era_lb+sb_era_db
+        
+          
+          
+                      
+          , data = method2_train)
+```
+
+```{r}
+my.summary.lm(summary(era), my.rows=1:4)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(era)
+```
+
+
+```{r}
+hist(era$residuals)
+```
+
+This model show promise with a relatively high r-squared of 0.4115. However, it needs cleaning and more advance feature selection. The residuals for this model seem close to normally distributed with QQ plot that has heavy tails which is driven by high leverage outliers. While this model takes advantage of publicly available data to achieve more accurate results, it still needs refining. In the next model we will take some of the elements from model 2 and apply them to a more thorough feature selection and deal with some other outstanding issues such as colinearity.
+
+
+## Method 3
+
+**Code Author: David Blumenstiel**
+
+### Data Prep & Feature Engineering
+
+```{r echo=FALSE}
+training <-read.csv("https://raw.githubusercontent.com/ChristopherBloome/621/main/moneyball-training-data.csv")
+testing <- read.csv("https://raw.githubusercontent.com/ChristopherBloome/621/main/moneyball-evaluation-data.csv")
+
+cleanup <- function(df, outlier_mult = 1.5) {  
+  #Outlier_mult is what mutliple of the IQR a value needs to be away from the median to be considered an outlier
+  
+  #Change NA to median where appropriate
+  df <- df %>% replace_na(list(TEAM_BATTING_SO = median(df$TEAM_BATTING_SO[(is.na(df$TEAM_BATTING_SO) == FALSE)]),
+                               TEAM_BASERUN_SB = median(df$TEAM_BASERUN_SB[(is.na(df$TEAM_BASERUN_SB) == FALSE)]),
+                               TEAM_BASERUN_CS = median(df$TEAM_BASERUN_CS[(is.na(df$TEAM_BASERUN_CS) == FALSE)]),
+                               TEAM_PITCHING_SO = median(df$TEAM_PITCHING_SO[(is.na(df$TEAM_PITCHING_SO) == FALSE)]),
+                               TEAM_FIELDING_DP = median(df$TEAM_FIELDING_DP[(is.na(df$TEAM_FIELDING_DP) == FALSE)])
+                               ))
+  
+  #Drop column with too many NA
+  df$TEAM_BATTING_HBP  <- NULL
+  df$INDEX <- NULL
+  
+  #Removes with outliers
+  i = 1 #Skip the index
+  k = 0 #Count of outliers changed
+  while (i < length(colnames(df))) {   #Column cycle
+    
+    i = i+1
+    iqr= IQR(df[,i])
+    med = median(df[,i])
+    max_range = c(med - iqr * outlier_mult, med + iqr * outlier_mult)  #Defines the maximum range, outside of which values are considered outliers
+      
+    j = 0
+    while (j < length(df[,i])) { #Row cycle
+      j = j + 1
+      
+      if (df[j,i] < max_range[1] || df[j,i] > max_range[2] ) {
+        
+        df[j,i] <- med #Sets outliers to median column value 
+        k = k + 1
+      }
+    }
+  }
+  
+  
+ 
+  print(paste("set",k, "outliers to median"))
+  return(df)
+}
+
+
+#Clean all the data
+testing <- cleanup(testing, outlier_mult = 5)    #Standard is 1.5, but this get's better results
+training <- cleanup(training, outlier_mult = 5)
+```
+
+```{r fig.width=30, fig.height= 30}
+# Explore Transformed Relationships
+layout(matrix(c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16), byrow=TRUE, ncol=4,nrow=4))
+#par(mfrow=c(4,4))
+names = colnames(training)
+for (i in 3:length(training)-1) {
+  name = names[i]
+  plot(training$TARGET_WINS ~ training[,i], xlab = name, ylab = "TARGET_WINS_transformed")
+  l = lm(training$TARGET_WINS ~ training[,i])
+  abline(l, col = "red")
+  text(min(training[,i]),130,paste("R^2 = ", round(summary(l)$r.squared,3),"  cor = ",round(cor(y = training$TARGET_WINS, x =  training[,i]),3)), adj = 0)
+}
+```
+
+
+### Model 1
+
+This model utilizes all variables except the pitching ones, which are pretty much co-linear with the batting ones.  This uses a stepwise method to narrow down the parameters, and checks all interactions terms 2 layers deep.  5 fold cv is used with 2 repeats.  A seperate validation set is held in reserve to gauge accuracy (stepwise regression is known for overfitting).
+
+```{r}
+set.seed(1234567890) #So you see the same thing I do
+
+#Set's up some K-fold validation and repetition
+tr <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+
+#Set's up validations set, which won't get touched during stepwise regression.  Gives us a better sense of performance
+split <- createDataPartition(training$TARGET_WINS, p = 0.8, list = FALSE)
+method3_train <- training[split,]
+validation <- training[-split,]
+
+#Set's up the model
+model <- train(TARGET_WINS~ (TEAM_BATTING_H + TEAM_BATTING_2B + TEAM_BATTING_3B + TEAM_BATTING_HR + TEAM_BATTING_BB + TEAM_BATTING_SO + TEAM_BASERUN_SB + TEAM_BASERUN_CS + TEAM_FIELDING_E + TEAM_FIELDING_DP)^2, data = method3_train, method = "lmStepAIC", trControl= tr,trace = FALSE)  #Supress the trace or else this will eat your screen
+
+predictions <- predict(model, validation)
+l <- lm(predictions~validation$TARGET_WINS)
+
+# View at results on validation data
+plot(predictions~validation$TARGET_WINS)
+text(10, 100, paste("R^2: ",round(summary(l)$r.squared,3)))
+abline(l$coefficients, col = 'red')
+```
+
+This model performs fairly well, with R^2 near 0.365 on the holdout set.   There seems to be a balancing act when it comes to outliers: a higher tolerance for keeping outliers leads to higher R^2 values, but more heteroscedascity.  As is now (with an outlier tolerance of $median \pm 5*IQR$, there's a slight heteroscedascity and heavy tails, but the model has a close fit.
+
+This model also uses some predictors which, by themselves, are not very predictive.  In addition, Stepwise regression is also known to cause problems, and can introduce biases which inflate the R^2.  However, the model performs well on the validation set.
+
+
+### Model 2
+
+First, we prepair the new features
+```{r message=FALSE, warning=FALSE, include=FALSE}
+yr <- data.frame(read_csv("https://raw.githubusercontent.com/agersowitz/DATA-621/main/year%20predict.csv"))
+
+
+method3_train <-training
+
+
+method3_train$X2B=(method3_train$TEAM_BATTING_2B/162)
+method3_train$X3B=(method3_train$TEAM_BATTING_3B/162)
+method3_train$BB=((method3_train$TEAM_BATTING_BB/162)+(method3_train$TEAM_PITCHING_BB/162))/2
+method3_train$SO=((method3_train$TEAM_BATTING_SO/162)+(method3_train$TEAM_PITCHING_SO/162))/2
+
+year<-lm(Year ~ X2B+X3B+BB+SO, data = yr)
+
+#summary(year)
+#plot(year)
+
+predicted_year<- predict(year, newdata = method3_train)
+
+method3_train<-cbind(method3_train,predicted_year)
+
+
+
+method3_train$era = ifelse(method3_train$predicted_year>= 1994,"Modern",
+                   ifelse(method3_train$predicted_year> 1977 & method3_train$predicted_year<1993, "FreeAgency",
+                   ifelse(method3_train$predicted_year> 1961 & method3_train$predicted_yea<1976, "Expansion",
+                   ifelse(method3_train$predicted_year> 1942 & method3_train$predicted_yea<1960, "Integration",
+                    ifelse(method3_train$predicted_year> 1920 & method3_train$predicted_yea<1941, "LiveBall",
+                          "DeadBall")))))
+
+method3_train<-dummy_cols(method3_train,select_columns=c("era"))
+
+
+method3_train$H_era_m <- (method3_train$TEAM_BATTING_H)*method3_train$era_Modern
+method3_train$H_era_fa <- (method3_train$TEAM_BATTING_H)*method3_train$era_FreeAgency
+method3_train$H_era_e <- (method3_train$TEAM_BATTING_H)*method3_train$era_Expansion
+method3_train$H_era_i <- (method3_train$TEAM_BATTING_H)*method3_train$era_Integration
+method3_train$H_era_lb <- (method3_train$TEAM_BATTING_H)*method3_train$era_LiveBall
+method3_train$H_era_db <- (method3_train$TEAM_BATTING_H)*method3_train$era_DeadBall
+
+method3_train$H_era_m_p <- (method3_train$TEAM_PITCHING_H)*method3_train$era_Modern
+method3_train$H_era_fa_p <- (method3_train$TEAM_PITCHING_H)*method3_train$era_FreeAgency
+method3_train$H_era_e_p <- (method3_train$TEAM_PITCHING_H)*method3_train$era_Expansion
+method3_train$H_era_i_p <- (method3_train$TEAM_PITCHING_H)*method3_train$era_Integration
+method3_train$H_era_lb_p <- (method3_train$TEAM_PITCHING_H)*method3_train$era_LiveBall
+method3_train$H_era_db_p <- (method3_train$TEAM_PITCHING_H)*method3_train$era_DeadBall
+
+method3_train$bb_era_m <- (method3_train$TEAM_BATTING_BB)*method3_train$era_Modern
+method3_train$bb_era_fa <- (method3_train$TEAM_BATTING_BB)*method3_train$era_FreeAgency
+method3_train$bb_era_e <- (method3_train$TEAM_BATTING_BB)*method3_train$era_Expansion
+method3_train$bb_era_i <- (method3_train$TEAM_BATTING_BB)*method3_train$era_Integration
+method3_train$bb_era_lb <- (method3_train$TEAM_BATTING_BB)*method3_train$era_LiveBall
+method3_train$bb_era_db <- (method3_train$TEAM_BATTING_BB)*method3_train$era_DeadBall
+
+method3_train$bb_era_m_p <- (method3_train$TEAM_PITCHING_BB)*method3_train$era_Modern
+method3_train$bb_era_fa_p <- (method3_train$TEAM_PITCHING_BB)*method3_train$era_FreeAgency
+method3_train$bb_era_e_p <- (method3_train$TEAM_PITCHING_BB)*method3_train$era_Expansion
+method3_train$bb_era_i_p <- (method3_train$TEAM_PITCHING_BB)*method3_train$era_Integration
+method3_train$bb_era_lb_p <- (method3_train$TEAM_PITCHING_BB)*method3_train$era_LiveBall
+method3_train$bb_era_db_p <- (method3_train$TEAM_PITCHING_BB)*method3_train$era_DeadBall
+
+method3_train$hr_era_m <- (method3_train$TEAM_BATTING_HR)*method3_train$era_Modern
+method3_train$hr_era_fa <- (method3_train$TEAM_BATTING_HR)*method3_train$era_FreeAgency
+method3_train$hr_era_e <- (method3_train$TEAM_BATTING_HR)*method3_train$era_Expansion
+method3_train$hr_era_i <- (method3_train$TEAM_BATTING_HR)*method3_train$era_Integration
+method3_train$hr_era_lb <- (method3_train$TEAM_BATTING_HR)*method3_train$era_LiveBall
+method3_train$hr_era_db <- (method3_train$TEAM_BATTING_HR)*method3_train$era_DeadBall
+
+method3_train$hr_era_m_p <- (method3_train$TEAM_PITCHING_HR)*method3_train$era_Modern
+method3_train$hr_era_fa_p <- (method3_train$TEAM_PITCHING_HR)*method3_train$era_FreeAgency
+method3_train$hr_era_e_p <- (method3_train$TEAM_PITCHING_HR)*method3_train$era_Expansion
+method3_train$hr_era_i_p <- (method3_train$TEAM_PITCHING_HR)*method3_train$era_Integration
+method3_train$hr_era_lb_p <- (method3_train$TEAM_PITCHING_HR)*method3_train$era_LiveBall
+method3_train$hr_era_db_p <- (method3_train$TEAM_PITCHING_HR)*method3_train$era_DeadBall
+
+method3_train$so_era_m <- (method3_train$TEAM_BATTING_SO)*method3_train$era_Modern
+method3_train$so_era_fa <- (method3_train$TEAM_BATTING_SO)*method3_train$era_FreeAgency
+method3_train$so_era_e <- (method3_train$TEAM_BATTING_SO)*method3_train$era_Expansion
+method3_train$so_era_i <- (method3_train$TEAM_BATTING_SO)*method3_train$era_Integration
+method3_train$so_era_lb <- (method3_train$TEAM_BATTING_SO)*method3_train$era_LiveBall
+method3_train$so_era_db <- (method3_train$TEAM_BATTING_SO)*method3_train$era_DeadBall
+
+method3_train$so_era_m_p <- (method3_train$TEAM_PITCHING_SO)*method3_train$era_Modern
+method3_train$so_era_fa_p <- (method3_train$TEAM_PITCHING_SO)*method3_train$era_FreeAgency
+method3_train$so_era_e_p <- (method3_train$TEAM_PITCHING_SO)*method3_train$era_Expansion
+method3_train$so_era_i_p <- (method3_train$TEAM_PITCHING_SO)*method3_train$era_Integration
+method3_train$so_era_lb_p <- (method3_train$TEAM_PITCHING_SO)*method3_train$era_LiveBall
+method3_train$so_era_db_p <- (method3_train$TEAM_PITCHING_SO)*method3_train$era_DeadBall
+
+method3_train$x2b_era_m <- (method3_train$TEAM_BATTING_2B)*method3_train$era_Modern
+method3_train$x2b_era_fa <- (method3_train$TEAM_BATTING_2B)*method3_train$era_FreeAgency
+method3_train$x2b_era_e <- (method3_train$TEAM_BATTING_2B)*method3_train$era_Expansion
+method3_train$x2b_era_i <- (method3_train$TEAM_BATTING_2B)*method3_train$era_Integration
+method3_train$x2b_era_lb <- (method3_train$TEAM_BATTING_2B)*method3_train$era_LiveBall
+method3_train$x2b_era_db <- (method3_train$TEAM_BATTING_2B)*method3_train$era_DeadBall
+
+method3_train$x3b_era_m <- (method3_train$TEAM_BATTING_3B)*method3_train$era_Modern
+method3_train$x3b_era_fa <- (method3_train$TEAM_BATTING_3B)*method3_train$era_FreeAgency
+method3_train$x3b_era_e <- (method3_train$TEAM_BATTING_3B)*method3_train$era_Expansion
+method3_train$x3b_era_i <- (method3_train$TEAM_BATTING_3B)*method3_train$era_Integration
+method3_train$x3b_era_lb <- (method3_train$TEAM_BATTING_3B)*method3_train$era_LiveBall
+method3_train$x3b_era_db <- (method3_train$TEAM_BATTING_3B)*method3_train$era_DeadBall
+
+method3_train$sb_era_m <- (method3_train$TEAM_BASERUN_SB)*method3_train$era_Modern
+method3_train$sb_era_fa <- (method3_train$TEAM_BASERUN_SB)*method3_train$era_FreeAgency
+method3_train$sb_era_e <- (method3_train$TEAM_BASERUN_SB)*method3_train$era_Expansion
+method3_train$sb_era_i <- (method3_train$TEAM_BASERUN_SB)*method3_train$era_Integration
+method3_train$sb_era_lb <- (method3_train$TEAM_BASERUN_SB)*method3_train$era_LiveBall
+method3_train$sb_era_db <- (method3_train$TEAM_BASERUN_SB)*method3_train$era_DeadBall
+
+method3_train$cs_era_m <- (method3_train$TEAM_BASERUN_CS)*method3_train$era_Modern
+method3_train$cs_era_fa <- (method3_train$TEAM_BASERUN_CS)*method3_train$era_FreeAgency
+method3_train$cs_era_e <- (method3_train$TEAM_BASERUN_CS)*method3_train$era_Expansion
+method3_train$cs_era_i <- (method3_train$TEAM_BASERUN_CS)*method3_train$era_Integration
+method3_train$cs_era_lb <- (method3_train$TEAM_BASERUN_CS)*method3_train$era_LiveBall
+method3_train$cs_era_db <- (method3_train$TEAM_BASERUN_CS)*method3_train$era_DeadBall
+
+
+method3_train$e_era_m <- (method3_train$TEAM_FIELDING_E)*method3_train$era_Modern
+method3_train$e_era_fa <- (method3_train$TEAM_FIELDING_E)*method3_train$era_FreeAgency
+method3_train$e_era_e <- (method3_train$TEAM_FIELDING_E)*method3_train$era_Expansion
+method3_train$e_era_i <- (method3_train$TEAM_FIELDING_E)*method3_train$era_Integration
+method3_train$e_era_lb <- (method3_train$TEAM_FIELDING_E)*method3_train$era_LiveBall
+method3_train$e_era_db <- (method3_train$TEAM_FIELDING_E)*method3_train$era_DeadBall
+
+
+method3_train$dp_era_m <- (method3_train$TEAM_FIELDING_DP)*method3_train$era_Modern
+method3_train$dp_era_fa <- (method3_train$TEAM_FIELDING_DP)*method3_train$era_FreeAgency
+method3_train$dp_era_e <- (method3_train$TEAM_FIELDING_DP)*method3_train$era_Expansion
+method3_train$dp_era_i <- (method3_train$TEAM_FIELDING_DP)*method3_train$era_Integration
+method3_train$dp_era_lb <- (method3_train$TEAM_FIELDING_DP)*method3_train$era_LiveBall
+method3_train$dp_era_db <- (method3_train$TEAM_FIELDING_DP)*method3_train$era_DeadBall
+```
+
+
+There's alot of collinearity among the new variables.  Below we drop collinear terms.
+
+```{r fig.height= 20, fig.width=20}
+method3_train$era <- NULL  #Gets rid of the only non numeric value
+dropem <- findCorrelation(cor(method3_train), cutoff = 0.7) #Finds collinear variables
+remove_names <- colnames(method3_train)[dropem] #Save for later
+method3_train <- method3_train[,-dropem] #Drops collinear variables
+corrplot(cor(method3_train))
+```
+
+Now to actually make/download the model.  This will look amongst both the origional variables and new ones, excluding colinear terms.  It will look to interaction terms deep, and do stepwise selection to pick narrow down the amount of coefficients used in the final model.  The stepwise selection process takes quite a while, so the chunk below is going to try to download the pre-trained model instead of training it again.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(1234567890) #So you see the same thing I do
+
+#Splits off a validation set for judging performance 
+split <- createDataPartition(method3_train$TARGET_WINS, p = 0.8, list = FALSE)
+train_set <- method3_train[split,]
+validation_set <- method3_train[-split,]
+
+#To save you time.  Internet connection highly advised.
+#https://stackoverflow.com/questions/56602149/directly-loading-rdata-from-github
+githubURL <- "https://github.com/davidblumenstiel/CUNY-MSDS-DATA-621/raw/main/Assignment1/era_model_stepped.rds"
+try(era_model_stepped <- readRDS(url(githubURL)))
+
+if (exists("era_model_stepped") == FALSE) {
+  
+  #Finds a linear model with two layers of interaction terms.  Has an R^2 of about 0.48, but way too many terms
+  era_model <- lm(TARGET_WINS ~ (TEAM_BATTING_H + TEAM_BASERUN_SB + TEAM_BASERUN_CS + TEAM_PITCHING_H + TEAM_PITCHING_HR + TEAM_PITCHING_BB + TEAM_PITCHING_SO + TEAM_FIELDING_E + TEAM_FIELDING_DP + X2B + X3B + hr_era_i + hr_era_lb + hr_era_db + sb_era_m + sb_era_m + sb_era_fa + sb_era_e + sb_era_i + sb_era_lb + sb_era_db)^2
+                  , data = train_set)
+  
+  #Stepwise regression.  Only going backwards because this takes a lot of computing
+  era_model_stepped <- stepAIC(era_model, direction = "backwards") 
+  
+  #Will save the model to working directory
+  saveRDS(era_model_stepped, "era_model_stepped.rds", compress = FALSE)
+}
+```
+
+```{r}
+
+# Make predictions on validation set
+predictions <- predict(era_model_stepped, validation_set)
+l <- lm(predictions~validation_set$TARGET_WINS)
+
+# View at results on validation data
+my.summary.lm(summary(era_model_stepped), my.rows=1:4)
+``` 
+
+```{r}
+par(mfrow=c(2,2))
+plot(era_model_stepped)
+```
+
+```{r}
+plot(predictions~validation_set$TARGET_WINS)
+text(10, 100, paste("R^2: ",round(summary(l)$r.squared,3)))
+abline(l$coefficients, col = 'red')
+```
+
+
+## Conclusion
+
+This model has an adjusted R^2 of 0.45, and a higher R^2 of 0.508 on the validation set, which is suprising.  The residuals seem okay, although there is perhaps somthing a slight curve to them.  The QQ plot reveals heavy tails, although most deviation is among a few outliers.  There's one leverage point with a Cook's distance score over 0.5.  Overall, this model could be used for decent predictions (and seems valid), but could probably have it's coefficients narrowed down further.  Stepwise selection has a tendency for overfitting, but this model seems to do better on the validation set, which is strange.
+
+
+## Predictions
+
+Below, we make predictions using the the model above (after a little hidden data prep).  It then saves them locally.
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+yr <- data.frame(read_csv("https://raw.githubusercontent.com/agersowitz/DATA-621/main/year%20predict.csv"))
+
+
+method3_test <-testing
+
+
+method3_test$X2B=(method3_test$TEAM_BATTING_2B/162)
+method3_test$X3B=(method3_test$TEAM_BATTING_3B/162)
+method3_test$BB=((method3_test$TEAM_BATTING_BB/162)+(method3_test$TEAM_PITCHING_BB/162))/2
+method3_test$SO=((method3_test$TEAM_BATTING_SO/162)+(method3_test$TEAM_PITCHING_SO/162))/2
+
+year<-lm(Year ~ X2B+X3B+BB+SO, data = yr)
+
+predicted_year<- predict(year, newdata = method3_test)
+
+method3_test<-cbind(method3_test,predicted_year)
+
+
+
+method3_test$era = ifelse(method3_test$predicted_year>= 1994,"Modern",
+                   ifelse(method3_test$predicted_year> 1977 & method3_test$predicted_year<1993, "FreeAgency",
+                   ifelse(method3_test$predicted_year> 1961 & method3_test$predicted_yea<1976, "Expansion",
+                   ifelse(method3_test$predicted_year> 1942 & method3_test$predicted_yea<1960, "Integration",
+                    ifelse(method3_test$predicted_year> 1920 & method3_test$predicted_yea<1941, "LiveBall",
+                          "DeadBall")))))
+
+method3_test<-dummy_cols(method3_test,select_columns=c("era"))
+
+
+method3_test$H_era_m <- (method3_test$TEAM_BATTING_H)*method3_test$era_Modern
+method3_test$H_era_fa <- (method3_test$TEAM_BATTING_H)*method3_test$era_FreeAgency
+method3_test$H_era_e <- (method3_test$TEAM_BATTING_H)*method3_test$era_Expansion
+method3_test$H_era_i <- (method3_test$TEAM_BATTING_H)*method3_test$era_Integration
+method3_test$H_era_lb <- (method3_test$TEAM_BATTING_H)*method3_test$era_LiveBall
+method3_test$H_era_db <- (method3_test$TEAM_BATTING_H)*method3_test$era_DeadBall
+
+method3_test$H_era_m_p <- (method3_test$TEAM_PITCHING_H)*method3_test$era_Modern
+method3_test$H_era_fa_p <- (method3_test$TEAM_PITCHING_H)*method3_test$era_FreeAgency
+method3_test$H_era_e_p <- (method3_test$TEAM_PITCHING_H)*method3_test$era_Expansion
+method3_test$H_era_i_p <- (method3_test$TEAM_PITCHING_H)*method3_test$era_Integration
+method3_test$H_era_lb_p <- (method3_test$TEAM_PITCHING_H)*method3_test$era_LiveBall
+method3_test$H_era_db_p <- (method3_test$TEAM_PITCHING_H)*method3_test$era_DeadBall
+
+method3_test$bb_era_m <- (method3_test$TEAM_BATTING_BB)*method3_test$era_Modern
+method3_test$bb_era_fa <- (method3_test$TEAM_BATTING_BB)*method3_test$era_FreeAgency
+method3_test$bb_era_e <- (method3_test$TEAM_BATTING_BB)*method3_test$era_Expansion
+method3_test$bb_era_i <- (method3_test$TEAM_BATTING_BB)*method3_test$era_Integration
+method3_test$bb_era_lb <- (method3_test$TEAM_BATTING_BB)*method3_test$era_LiveBall
+method3_test$bb_era_db <- (method3_test$TEAM_BATTING_BB)*method3_test$era_DeadBall
+
+method3_test$bb_era_m_p <- (method3_test$TEAM_PITCHING_BB)*method3_test$era_Modern
+method3_test$bb_era_fa_p <- (method3_test$TEAM_PITCHING_BB)*method3_test$era_FreeAgency
+method3_test$bb_era_e_p <- (method3_test$TEAM_PITCHING_BB)*method3_test$era_Expansion
+method3_test$bb_era_i_p <- (method3_test$TEAM_PITCHING_BB)*method3_test$era_Integration
+method3_test$bb_era_lb_p <- (method3_test$TEAM_PITCHING_BB)*method3_test$era_LiveBall
+method3_test$bb_era_db_p <- (method3_test$TEAM_PITCHING_BB)*method3_test$era_DeadBall
+
+method3_test$hr_era_m <- (method3_test$TEAM_BATTING_HR)*method3_test$era_Modern
+method3_test$hr_era_fa <- (method3_test$TEAM_BATTING_HR)*method3_test$era_FreeAgency
+method3_test$hr_era_e <- (method3_test$TEAM_BATTING_HR)*method3_test$era_Expansion
+method3_test$hr_era_i <- (method3_test$TEAM_BATTING_HR)*method3_test$era_Integration
+method3_test$hr_era_lb <- (method3_test$TEAM_BATTING_HR)*method3_test$era_LiveBall
+method3_test$hr_era_db <- (method3_test$TEAM_BATTING_HR)*method3_test$era_DeadBall
+
+method3_test$hr_era_m_p <- (method3_test$TEAM_PITCHING_HR)*method3_test$era_Modern
+method3_test$hr_era_fa_p <- (method3_test$TEAM_PITCHING_HR)*method3_test$era_FreeAgency
+method3_test$hr_era_e_p <- (method3_test$TEAM_PITCHING_HR)*method3_test$era_Expansion
+method3_test$hr_era_i_p <- (method3_test$TEAM_PITCHING_HR)*method3_test$era_Integration
+method3_test$hr_era_lb_p <- (method3_test$TEAM_PITCHING_HR)*method3_test$era_LiveBall
+method3_test$hr_era_db_p <- (method3_test$TEAM_PITCHING_HR)*method3_test$era_DeadBall
+
+method3_test$so_era_m <- (method3_test$TEAM_BATTING_SO)*method3_test$era_Modern
+method3_test$so_era_fa <- (method3_test$TEAM_BATTING_SO)*method3_test$era_FreeAgency
+method3_test$so_era_e <- (method3_test$TEAM_BATTING_SO)*method3_test$era_Expansion
+method3_test$so_era_i <- (method3_test$TEAM_BATTING_SO)*method3_test$era_Integration
+method3_test$so_era_lb <- (method3_test$TEAM_BATTING_SO)*method3_test$era_LiveBall
+method3_test$so_era_db <- (method3_test$TEAM_BATTING_SO)*method3_test$era_DeadBall
+
+method3_test$so_era_m_p <- (method3_test$TEAM_PITCHING_SO)*method3_test$era_Modern
+method3_test$so_era_fa_p <- (method3_test$TEAM_PITCHING_SO)*method3_test$era_FreeAgency
+method3_test$so_era_e_p <- (method3_test$TEAM_PITCHING_SO)*method3_test$era_Expansion
+method3_test$so_era_i_p <- (method3_test$TEAM_PITCHING_SO)*method3_test$era_Integration
+method3_test$so_era_lb_p <- (method3_test$TEAM_PITCHING_SO)*method3_test$era_LiveBall
+method3_test$so_era_db_p <- (method3_test$TEAM_PITCHING_SO)*method3_test$era_DeadBall
+
+method3_test$x2b_era_m <- (method3_test$TEAM_BATTING_2B)*method3_test$era_Modern
+method3_test$x2b_era_fa <- (method3_test$TEAM_BATTING_2B)*method3_test$era_FreeAgency
+method3_test$x2b_era_e <- (method3_test$TEAM_BATTING_2B)*method3_test$era_Expansion
+method3_test$x2b_era_i <- (method3_test$TEAM_BATTING_2B)*method3_test$era_Integration
+method3_test$x2b_era_lb <- (method3_test$TEAM_BATTING_2B)*method3_test$era_LiveBall
+method3_test$x2b_era_db <- (method3_test$TEAM_BATTING_2B)*method3_test$era_DeadBall
+
+method3_test$x3b_era_m <- (method3_test$TEAM_BATTING_3B)*method3_test$era_Modern
+method3_test$x3b_era_fa <- (method3_test$TEAM_BATTING_3B)*method3_test$era_FreeAgency
+method3_test$x3b_era_e <- (method3_test$TEAM_BATTING_3B)*method3_test$era_Expansion
+method3_test$x3b_era_i <- (method3_test$TEAM_BATTING_3B)*method3_test$era_Integration
+method3_test$x3b_era_lb <- (method3_test$TEAM_BATTING_3B)*method3_test$era_LiveBall
+method3_test$x3b_era_db <- (method3_test$TEAM_BATTING_3B)*method3_test$era_DeadBall
+
+method3_test$sb_era_m <- (method3_test$TEAM_BASERUN_SB)*method3_test$era_Modern
+method3_test$sb_era_fa <- (method3_test$TEAM_BASERUN_SB)*method3_test$era_FreeAgency
+method3_test$sb_era_e <- (method3_test$TEAM_BASERUN_SB)*method3_test$era_Expansion
+method3_test$sb_era_i <- (method3_test$TEAM_BASERUN_SB)*method3_test$era_Integration
+method3_test$sb_era_lb <- (method3_test$TEAM_BASERUN_SB)*method3_test$era_LiveBall
+method3_test$sb_era_db <- (method3_test$TEAM_BASERUN_SB)*method3_test$era_DeadBall
+
+method3_test$cs_era_m <- (method3_test$TEAM_BASERUN_CS)*method3_test$era_Modern
+method3_test$cs_era_fa <- (method3_test$TEAM_BASERUN_CS)*method3_test$era_FreeAgency
+method3_test$cs_era_e <- (method3_test$TEAM_BASERUN_CS)*method3_test$era_Expansion
+method3_test$cs_era_i <- (method3_test$TEAM_BASERUN_CS)*method3_test$era_Integration
+method3_test$cs_era_lb <- (method3_test$TEAM_BASERUN_CS)*method3_test$era_LiveBall
+method3_test$cs_era_db <- (method3_test$TEAM_BASERUN_CS)*method3_test$era_DeadBall
+
+
+method3_test$e_era_m <- (method3_test$TEAM_FIELDING_E)*method3_test$era_Modern
+method3_test$e_era_fa <- (method3_test$TEAM_FIELDING_E)*method3_test$era_FreeAgency
+method3_test$e_era_e <- (method3_test$TEAM_FIELDING_E)*method3_test$era_Expansion
+method3_test$e_era_i <- (method3_test$TEAM_FIELDING_E)*method3_test$era_Integration
+method3_test$e_era_lb <- (method3_test$TEAM_FIELDING_E)*method3_test$era_LiveBall
+method3_test$e_era_db <- (method3_test$TEAM_FIELDING_E)*method3_test$era_DeadBall
+
+
+method3_test$dp_era_m <- (method3_test$TEAM_FIELDING_DP)*method3_test$era_Modern
+method3_test$dp_era_fa <- (method3_test$TEAM_FIELDING_DP)*method3_test$era_FreeAgency
+method3_test$dp_era_e <- (method3_test$TEAM_FIELDING_DP)*method3_test$era_Expansion
+method3_test$dp_era_i <- (method3_test$TEAM_FIELDING_DP)*method3_test$era_Integration
+method3_test$dp_era_lb <- (method3_test$TEAM_FIELDING_DP)*method3_test$era_LiveBall
+method3_test$dp_era_db <- (method3_test$TEAM_FIELDING_DP)*method3_test$era_DeadBall
+
+
+
+method3_test$era <- NULL  
+method3_test <- method3_test[ , -which(names(method3_test) %in% remove_names)] #Removes variables in accordance to model
+
+```
+
+
+```{r}
+predictions <- as.data.frame(predict(era_model_stepped, method3_test))
+write.csv(predictions, "group1_predictions.csv")
+print("Saved")
+```
+
+
+
+
+
+
+
+
