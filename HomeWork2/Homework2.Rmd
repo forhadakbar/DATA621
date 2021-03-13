@@ -1,0 +1,481 @@
+---
+title: 'Exploring Classification Metrics'
+author: 'Forhad Akbar'
+date: '03/12/2021'
+output:
+  rmdformats::readthedown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+## Load Packages
+
+
+```{r, message=FALSE,warning=FALSE}
+library(tidyverse)
+library(caret)
+library(pROC)
+library(knitr)
+```
+
+
+## Overview
+
+In this homework assignment, we were asked to work through various classification metrics. We were asked to create  functions in R to carry out the various calculations. We were also asked to investigate some functions in packages that will let you obtain the equivalent results. Finally, We were asked to create graphical output that also can be used to evaluate the output of classification models, such as binary logistic regression. The data set was provided by the professor.  
+
+## Load Data
+
+```{r message=F}
+#read the data
+data <- read.csv("./classification-output-data.csv", stringsAsFactors = FALSE)
+```
+
+First we should investigate the data file provided. It looks like the dependent variable class was regressed against several independent variables. The Scored class is the predicted variable, and the scored.probability shows the probability that the scored.class belongs to a class of 1. A further description of the variables is given below:
+
+* *pregnant*: no of times pregnant
+* *glucose*: plasma glucose concentration
+* *diastolic*: diastolic blood pressure
+* *skinfold*: triceps skin fold thickness
+* *insulin*: serum insulin test
+* *bmi*: body mass index
+* *pedigree*: diabetes pedigree function
+* *age*: age in years
+* *class*: (1: positive for diabetes, 0 negative for diabetes)
+
+Source: https://www.kaggle.com/kumargh/pimaindiansdiabetescsv
+
+```{r echo=F}
+head(data) %>% kable()
+```
+
+
+## Question 2
+
+
+The data set has three key columns we will use:
+
+* *class*: the actual class for the observation
+* *scored.class*: the predicted class for the observation (based on a threshold of 0.5)
+* *scored.probability*: the predicted probability of success for the observation
+
+> Use the table() function to get the raw confusion matrix for this scored dataset. Make sure you understand the output. In particular, do the rows represent the actual or predicted class? The columns?
+
+First, Let us look at the actual class and predicted class separately.
+
+Actual class
+
+```{r}
+table(data$class, dnn = "Actual class")  %>% kable()  
+```
+
+Predicted class
+
+```{r}
+table(data$scored.class, dnn = "Predicted class")  %>% kable() 
+```
+
+**A quick sanity check using function on threshold of stored.class and scored.probability**  
+
+Let's examine if there is any row where stored.class is 1 and scored.probability is less than 0.5 or stored.class is not 1 and scored.probability is greater than or equal to 0.5.   
+
+```{r}
+Prob_check <- function(df) {
+   count <- 0
+   for(i in 1:nrow(data)) {
+      if ( (df$scored.class[i] == 1 & df$scored.probability[i] < 0.5) | (df$scored.class[i] != 1 & df$scored.probability[i] >= 0.5) ) {
+         count <- count + 1
+      }
+   }
+   return(count)
+}
+```
+
+```{r}
+print(paste0("Row count: ", sprintf("%1d", Prob_check(data))))
+```
+
+So, we observe that there are no such row.  
+
+
+Raw confusion matrix for the data  
+
+```{r}
+table(data$scored.class, data$class,
+      dnn = c("Predicted", "Actual"))  %>% kable()  
+```
+
+
+
+A confusion matrix is a table that is often used to describe the performance of a classification model (or "classifier") on a set of test data for which the true values are known. 
+
+A true positive is an outcome where the model correctly predicts the positive class. Similarly, a true negative is an outcome where the model correctly predicts the negative class.
+
+A false positive is an outcome where the model incorrectly predicts the positive class. And a false negative is an outcome where the model incorrectly predicts the negative class.
+
+
+Source:  https://developers.google.com/machine-learning/crash-course/classification/true-false-positive-negative
+
+
+
+* TP True Positive Row1Col1: 119  (Actual 0 and Predicted 0)
+
+* TN True Positive Row2Col2: 27 (Actual 1 and Predicted 1)
+
+* FN False Positive Row2Col1: 5 of the observations had an actual value of 0 but predicted as 1.
+
+* FP False Negative Row1Col2: 30 of the observations had an actual value of 1 but predicted as 0
+
+## Question 03
+
+> Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the accuracy of the predictions.
+
+$$Accuracy = \frac{TP + TN}{TP + FP + TN + FN}$$
+Let's write a R function to calculate accuracy:
+
+```{r}
+get_accuracy <- function(df){
+   confusion_matrix <- table(df$scored.class, df$class,
+                        dnn = c("Predicted", "Actual"))
+   TN <- confusion_matrix[2,2]
+   FN <- confusion_matrix[2,1]
+   FP <- confusion_matrix[1,2]
+   TP <- confusion_matrix[1,1]
+   accuracy <- (TP+TN)/(TP+FP+TN+FN)
+   #print(paste0("The Accuracy rate is ", sprintf("%1.2f%%", 100*Accuracy)))
+   return(accuracy)
+}
+```
+
+
+```{r}
+get_accuracy(data)
+```
+
+If we run the function on our data and we find an accuracy rate of 80.7%.
+
+
+```{r}
+acc<-confusionMatrix(table(data$scored.class, data$class))
+acc$overall['Accuracy']
+```
+
+We can do the same using the caret package and it returns the same result.
+
+## Question 04
+
+> Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the classification error rate of the predictions.
+
+Verify that you get an accuracy and an error rate that sums to one.
+
+$$Classification\ Error\ Rate = \frac{FP + FN}{TP + FP + TN + FN}$$
+Let's create a R function to calculate Classification error rate.
+
+```{r}
+get_classification_error <- function(df){
+   confusion_matrix <- table(df$scored.class, df$class,
+                        dnn = c("Predicted", "Actual"))
+   TN <- confusion_matrix[2,2]
+   FN <- confusion_matrix[2,1]
+   FP <- confusion_matrix[1,2]
+   TP <- confusion_matrix[1,1]
+   error_rate <- (FP+FN)/(TP+FP+TN+FN)
+   return(error_rate)
+    
+}
+```
+
+Let's run it on our data  
+
+```{r}
+get_classification_error(data)
+```
+
+
+```{r}
+print(paste0("The sum is ", (get_classification_error(data) + get_accuracy(data))))
+```
+
+We can verify from above that an accuracy and an error rate that sums to one.  
+
+## Question 5
+
+> Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the precision of the predictions.
+
+$$Precision=\frac{TP}{TP+FP}$$
+Let's create a R function to calculate precision:
+
+```{r}
+get_precision <- function(df){
+   confusion_matrix <- table(df$scored.class, df$class,
+                        dnn = c("Predicted", "Actual"))
+   TN <- confusion_matrix[2,2]
+   FN <- confusion_matrix[2,1]
+   FP <- confusion_matrix[1,2]
+   TP <- confusion_matrix[1,1]
+   Precision <- (TP)/(TP+FP)
+   return(Precision)
+}
+```
+
+Let's run it on our data
+
+```{r}
+get_precision(data)
+```
+
+Let's verify using caret:
+
+```{r}
+posPredValue(table(data$scored.class, data$class))
+```
+
+## Question 7
+
+> Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the sensitivity of the predictions. Sensitivity is also known as recall.
+
+$$Sensitivity=\frac{TP}{TP+FN}$$
+
+Sensitivity is also known as Recall, Hit rate or True Positive Rate (TPR). 
+
+Let's create a R function to calculate Sensitivity:
+
+```{r}
+get_sensitivity <- function(df){
+   confusion_matrix <- table(df$scored.class, df$class,
+                        dnn = c("Predicted", "Actual"))
+   TN <- confusion_matrix[2,2]
+   FN <- confusion_matrix[2,1]
+   FP <- confusion_matrix[1,2]
+   TP <- confusion_matrix[1,1]
+   sensitivity <- (TP)/(TP+FN)
+   return(sensitivity)
+}
+```
+
+Let's run it on our data
+
+```{r}
+get_sensitivity(data)
+```
+Let's verify using caret:
+
+```{r}
+sensitivity(table(data$scored.class, data$class))
+```
+
+
+## Question 7
+
+> Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the specificity of the predictions.
+
+$$Specificity=\frac{TN}{TN+FP}$$
+
+Specificity is also called selectivity or True Negative Rate (TNR).  
+Let's create a R function to calculate Specificity:
+
+```{r}
+get_specificity <- function(df){
+   confusion_matrix <- table(df$scored.class, df$class,
+                        dnn = c("Predicted", "Actual"))
+   TN <- confusion_matrix[2,2]
+   FN <- confusion_matrix[2,1]
+   FP <- confusion_matrix[1,2]
+   TP <- confusion_matrix[1,1]
+   specificity <- (TN)/(TN+FP)
+   return(specificity)
+}
+```
+
+Let's run it on our data
+
+```{r}
+get_specificity(data)
+```
+
+Let's verify using caret:
+
+```{r}
+specificity(table(data$scored.class, data$class))
+```
+## Question 8
+
+> Write a function that takes the data set as a dataframe, with actual and predicted classifications identified, and returns the F1 score of the predictions.
+
+$$F1\ Score=\frac{2*Precision*Sensitivity}{Precision + Sensitivity}$$
+
+The F1-score or F-measure is a measure of a test's accuracy. F1 Score is the harmonic mean of precision and sensitivity. The highest possible value of an F-score is 1.0, indicating perfect precision and recall, and the lowest possible value is 0, if either the precision or the recall is zero. 
+
+The R function is below:
+
+```{r}
+get_F1_score <- function(df){
+   confusion_matrix <- table(df$scored.class, df$class,
+                        dnn = c("Predicted", "Actual"))
+   TN <- confusion_matrix[2,2]
+   FN <- confusion_matrix[2,1]
+   FP <- confusion_matrix[1,2]
+   TP <- confusion_matrix[1,1]
+   sensitivity <- (TP)/(TP+FN)
+   precision <- (TP)/(TP+FP)
+   F1_score <- (2 * precision * sensitivity)/(precision + sensitivity)
+   return(F1_score)
+}
+```
+
+Let's run it on our data
+
+```{r}
+get_F1_score(data)
+```
+Let's verify using caret:
+
+```{r}
+acc$byClass['F1']
+```
+## Question 9
+
+> Before we move on, let’s consider a question that was asked: What are the bounds on the F1 score? Show that the F1 score will always be between 0 and 1. (Hint: If 0 < a < 1 and 0 < b < 1 then a b < a)
+
+Precision values can range from 0 to 1
+
+$$0\ge p\ge 1$$
+
+Sensitivity values can also range from 0 to 1
+
+$$0\ge s\ge 1$$
+Using If 0 < a < 1 and 0 < b < 1 then ab < a, we get
+
+$$ps\le s$$
+$$ps\le p$$
+This implies that
+
+$$0\le ps\le p\le 1$$
+$$0\le ps\le s\le 1$$
+
+
+Any resulting quotient will range from 0 to 1. This prove that the F1 score will always be between 0 and 1
+
+## Question 10
+
+> Write a function that an ROC curve from a data set  with a true classification
+column (class in our example) and a probability column (scored.probability in our example).
+Your function should return a list that includes the plot of the ROC curve and a vector that
+contains the calculated area under the curve (AUC). Note that I recommend using a sequence
+of thresholds ranging from 0 to 1 at 0.01 intervals.
+
+Let's create a R function an ROC curve from a data set:
+
+```{r}
+roc_function<- function(d){ 
+   #Create a count
+   temp <- table(d[ ,'class'], d[ ,"scored.probability"])
+   #Calculate frequency
+   allPos <- sum(data$class == 1, na.rm=TRUE)
+   allNeg <- sum(data$class == 0, na.rm=TRUE)
+   #Set threshold
+   threshold <- seq(0,1,0.01)
+   #Calculating probability for threshold
+   x <- c()
+   y <- c()
+   for (i in 1:length(threshold)) {
+      TP <- sum(data$scored.probability >= threshold[i] & data$class == 1, na.rm=TRUE)
+      TN <- sum(data$scored.probability < threshold[i] & data$class == 0, na.rm=TRUE)
+      y[i] <- TP / allPos
+      x[i] <- 1-TN / allNeg
+   }  
+
+   rocPlot <- plot(x,y,type = "s", xlim=c(-0.5,1.5),
+                 main = "ROC Curve from function",
+                 xlab = "1-Specificity",
+                 ylab = "Sensitivity")
+   fPlot <- abline(0,1); fPlot
+
+   xd <- c(0, abs(diff(x)))
+   fAuc <- sum(xd*y); fAuc
+
+   print(paste0("Area under the curve: ", fAuc))
+}
+```
+
+Let's call the function on our data
+
+```{r}
+roc_function(data)
+```
+## Question 11
+
+> Use your created R functions and the provided classification output data set to produce all of the classification metrics discussed above.
+
+The classification metrics can be found using R function created is as follows:
+
+```{r message=FALSE}
+classification_metrics <- 
+         c(get_accuracy(data), 
+         get_classification_error(data),
+         get_precision(data),
+         get_sensitivity(data), 
+         get_specificity(data),
+         get_F1_score(data))
+names(classification_metrics) <- c("Accuracy", "Classification Error", "Precision", 
+                "Sensitivity", "Specificity", "F1 Score")
+classification_metrics<-as.data.frame(classification_metrics)
+names(classification_metrics)[1]<-'Scores'
+kable(classification_metrics)
+```
+
+
+## Question 12
+
+> Investigate the caret package. In particular, consider the functions confusionMatrix, sensitivity, and specificity. Apply the functions to the data set. How do the results compare with your own functions?
+
+We have already compared our function output with the caret package for each part. Our functions output exactly matches with caret package.  
+
+
+```{r}
+classification_metrics_Caret <- confusionMatrix(data = as.factor(data$scored.class), reference = as.factor(data$class), positive = '0')
+classification_metrics_Caret
+```
+
+## Question 13
+
+> Investigate the pROC package. Use it to generate an ROC curve for the data set. How do the results compare with your own functions?
+
+```{r}
+#Generate the function
+rCurve <- roc(data$class, data$scored.probability, levels=c(1,0), direction=">")
+```
+
+Area under the curve
+
+```{r}
+auc(rCurve)
+```
+
+Confidence interval for the curve
+
+```{r}
+ci(rCurve)
+```
+
+Let us compare the ROC curve from the pRoc package to the one we generates for question 10. We see that graph looks the same, however we got Area under the curve of 0.8438 compared to 0.8503 from the pRoc package. 
+
+```{r}
+plot(rCurve, main="ROC Curve from pRoc", legacy.axes = TRUE, print.auc=TRUE)
+roc_function(data)
+```
+
+
+
+
+## References
+
+https://www.kaggle.com/kumargh/pimaindiansdiabetescsv
+https://developers.google.com/machine-learning/crash-course/classification/true-false-positive-negative
+ps://en.wikipedia.org/wiki/Confusion_matrix
+https://rdrr.io/cran/caret/man/sensitivity.html
+https://cran.r-project.org/web/packages/pROC/index.html
+https://stackoverflow.com/questions/41056896/proc-changing-scale-of-the-roc-chart
