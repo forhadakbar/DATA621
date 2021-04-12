@@ -226,8 +226,8 @@ test3$target <- as.factor(test3$target)
 
 # Calculating confusion matrix for model1
 preds1 <- predict(model1, newdata = test3)
-preds1[preds1 > 0.05] = 1
-preds1[preds1 < 0.05] = 0
+preds1[preds1 > 0.5] = 1
+preds1[preds1 < 0.5] = 0
 preds1 <- as.factor(preds1)
 model1_cm <- confusionMatrix(preds1, test3$target,mode="everything")
 tidy1 <- tidy(model1_cm[[2]])
@@ -238,8 +238,8 @@ plot_confusion_matrix(tidy1, target_col = "Prediction", prediction_col = "Refere
 
 # Calculating confusion matrix for model2
 preds2 <- predict(model2, newdata = test3)
-preds2[preds2 > 0.05] = 1
-preds2[preds2 < 0.05] = 0
+preds2[preds2 > 0.5] = 1
+preds2[preds2 < 0.5] = 0
 preds2 <- as.factor(preds2)
 model2_cm <- confusionMatrix(preds2, test3$target,mode="everything")
 tidy2 <- tidy(model2_cm[[2]])
@@ -249,8 +249,8 @@ plot_confusion_matrix(tidy2, target_col = "Prediction", prediction_col = "Refere
 
 # Calculating confusion matrix for model3
 preds3 <- predict(model3, newdata = test3)
-preds3[preds3 > 0.05] = 1
-preds3[preds3 < 0.05] = 0
+preds3[preds3 > 0.5] = 1
+preds3[preds3 < 0.5] = 0
 preds3 <- as.factor(preds3)
 model3_cm <- confusionMatrix(preds3, test3$target,mode="everything")
 tidy3 <- tidy(model3_cm[[2]])
@@ -260,8 +260,8 @@ plot_confusion_matrix(tidy3, target_col = "Prediction", prediction_col = "Refere
 
 # Calculating confusion matrix for model4
 preds4 <- predict(model4@objects[[1]], newdata = test3)
-preds4[preds4 > 0.05] = 1
-preds4[preds4 < 0.05] = 0
+preds4[preds4 > 0.5] = 1
+preds4[preds4 < 0.5] = 0
 preds4 <- as.factor(preds4)
 model4_cm <- confusionMatrix(preds4, test3$target,mode="everything")
 tidy4 <- tidy(model4_cm[[2]])
