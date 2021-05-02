@@ -1,11 +1,10 @@
 ---
-title: 'Homework 04'
-author: 'Forhad Akbar'
+title: "Homework 04"
+author: "Forhad Akbar"
 date: '2021-04-25'
-output:
-   rmdformats::readthedown
----
+output: rmdformats::readthedown
 
+---
 
 ```{r setup, include=FALSE, message=FALSE, warnings=FALSE}
 # knitr::opts_chunk$set(echo = TRUE)
@@ -50,31 +49,34 @@ Your objective is to build multiple linear regression and binary logistic regres
 
 # Data Exploration
 
-```{r}
+We will explore both training and evaluation data as the first step in the data exploration.
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_train_data <- read.csv("./insurance_training_data.csv", stringsAsFactors = FALSE)
 Ins_eval_data <- read.csv("./insurance-evaluation-data.csv", stringsAsFactors = FALSE)
 ```
 
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 dim1 <- dim(Ins_train_data)
 print(paste0('Dimension of training set:   ', 'Number of rows: ', dim1[1], ', ', 'Number of cols: ', dim1[2]))
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 head(Ins_train_data)
 ```
 
 
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 print('Structure of training data set:')
 str(Ins_train_data)
 ```
 
       
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_train_format <- Ins_train_data[-1]
 
 Ins_train_format$INCOME <- as.numeric(gsub('[$,]', '', Ins_train_format$INCOME))
@@ -91,46 +93,48 @@ Ins_train_format$CAR_TYPE  <- gsub("z_", "", Ins_train_format$CAR_TYPE)
 Ins_train_format$URBANICITY  <- gsub("z_", "", Ins_train_format$URBANICITY)
 ```
 
+\newpage
+
 Checking for NA.    
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 any(is.na(Ins_train_format))
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 missmap(Ins_train_format, main="Missing Values") # using Amelia package
 ```
 
+There are NA in our data, We will impute NA using mice().
 
-NA does exist. So, we'll impute with mice().     
+    
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_train_imputed <- mice(Ins_train_format, m = 1, method = "pmm", print = F) %>% complete()
 ```
 
 Rechecking for NA after imputation.    
 
 }
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 missmap(Ins_train_imputed, main="Missing Values") # using Amelia package
 ```
 
 
-We observe that NA were removed. In the following, we'll visualize with missmap().        
+We observe that NA were removed.      
 
 
-  
-
-Here, we'll explore the data a little further. First, we'll take a quick look at min, 1st quartile, median, mean, 2nd quartile, max etc.     
+Here, We'll further explore the data. Firsr, We'll look at min, 1st quartile, median, mean, 2nd quartile, max etc.     
 
 ```{r, message = FALSE, warning = FALSE, echo = F}
 summary(Ins_train_imputed) %>% kable
 ```
 
 ## Data reordering      
+
 For downstream analysis, we'll reorder the columns into categorical, numeric and target.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 indx <- c(8, 10:13, 15, 18:19, 22, 25, 3:7, 9, 14, 16:17, 20:21, 23:24, 1:2)
 
 Ins_train_ordered <- Ins_train_imputed
@@ -139,9 +143,10 @@ setcolorder(Ins_train_ordered, indx)
 ```
 
 ## Boxplots       
+
 First look at the boxplots.      
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 par(mfrow = c(3, 3))
 for(i in 11:25) {
 	if (is.numeric(Ins_train_ordered[,i])) {
@@ -153,7 +158,7 @@ for(i in 11:25) {
 
 The boxplots show that some of the variables have outliers in them. So, we'll cap them.      
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_train_cap <- Ins_train_ordered
 
 for (i in 11:23) {
@@ -166,7 +171,7 @@ for (i in 11:23) {
 }
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 par(mfrow = c(3, 3))
 for(i in 11:25) {
 	if (is.numeric(Ins_train_cap[,i])) {
@@ -174,23 +179,25 @@ for(i in 11:25) {
    }
 }
 ```
-The fields AGE, HOMEKIDS, INCOME, HOME_VAL, TRVTIME, BLUEBOOK, TIF, CLM_FREQ, MVR_PTS, CAR_AGE have higher variance. Let's ignore the boxplots for TARGET_FLAG and TARGET_AMT.       
+The fields AGE, HOMEKIDS, INCOME, HOME_VAL, TRVTIME, BLUEBOOK, TIF, CLM_FREQ, MVR_PTS, CAR_AGE have higher variance. We will ignore the boxplots for TARGET_FLAG and TARGET_AMT here.       
 
 ## Histograms       
-Histograms tell us how the data is distributed in the dataset (numeric fields).    
 
-```{r}
+We will see how the  data is distributed (numeric fields) using histrogram.    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
 multi.hist(Ins_train_cap[11:18])
 multi.hist(Ins_train_cap[19:23])
 ```
 
 
-The histograms show that AGE, YOJ, INCOME, HOME_VAL, TRAVTIME, BLUEBOOK and CAR_AGE are approximately normally distributed. HOME_VALUE, CAR_AGE and CLM_FREQ are quite dispersed.     
+We can see that AGE, YOJ, INCOME, HOME_VAL, TRAVTIME, BLUEBOOK and CAR_AGE are approximately normally distributed. HOME_VALUE, CAR_AGE and CLM_FREQ are quite dispersed.     
 
-## Categorical variables     
-Now, we'll explore the Categorical variables.    
+## Categorical variables    
 
-```{r}
+Now, let's explore the Categorical variables.    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
 cat('PARENT1:')
 table(Ins_train_cap$PARENT1)
 
@@ -221,10 +228,11 @@ table(Ins_train_cap$REVOKED)
 cat("URBANICITY:")
 table(Ins_train_cap$URBANICITY)
 ```
+\newpage
 
-Observation: In JOB column, 526 rows are empty. So, we'll impute them with "Unknown".         
+There are 526 rows empty in JOB column. So, we'll impute them with "Unknown".         
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_train_cap_imputed <- Ins_train_cap %>% mutate(JOB = ifelse((JOB == ""), "Unknown", JOB))
 
 cat("JOB:")
@@ -237,7 +245,7 @@ At this point the data is prepared. So, we'll explore the top correlated variabl
 
 There are 25 variables, among which 15 are numeric and 10 are non-categorical. In order to find the top correlated variables, we'll give numerical values to the correlated variables.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_train_corr <- data.frame(lapply(Ins_train_cap_imputed, function(x) as.numeric(as.factor(x))))  # converting the categorical values to numeric
 
 t_flg <- sort(cor(dplyr::select(Ins_train_corr, TARGET_FLAG, everything()))[,1], decreasing = T)
@@ -249,7 +257,7 @@ kable(cbind(t_flg, t_amt), col.names = c("TARGET_FLAG", "TARGET_AMT")) %>% kable
 
 Now, we'll look at the correlation matrix of the variables.      
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 cor_mx = cor(Ins_train_corr, use = "pairwise.complete.obs", method = "pearson")
 
 corrplot(cor_mx, method = "color", type = "upper", order = "original", number.cex = .7, addCoef.col = "black",   #Add coefficient of correlation
@@ -260,47 +268,40 @@ corrplot(cor_mx, method = "color", type = "upper", order = "original", number.ce
 
 
 
+\newpage
 
-
-
-
-
-
-
-
-
-At this point exploration, preparation and pair-wise correlations of **insurance_training_data.csv** are done. So, I'll begin the same exericse for **insurance-evaluation-data.csv**.         
+At this point exploration, preparation and pair-wise correlations of **insurance_training_data.csv** are done. So, I'll begin the same exercise for **insurance-evaluation-data.csv**.         
 
 
 # Data Exploration of insurance-evaluation-data.csv.      
 
-Initially, we’ll do a cursory exploration of the data. After that, we’ll iteratively prepare and explore the data, wherever required.       
+Initially, We’ll do a cursory exploration of the data. After that, we’ll iteratively prepare and explore the data, wherever required.       
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 dim2 <- dim(Ins_eval_data)
 print(paste0('Dimension of training set:   ', 'Number of rows: ', dim2[1], ', ', 'Number of cols: ', dim2[2]))
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 print('Head of training data set:')
 head(Ins_eval_data)
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 print('Structure of training data set:')
 str(Ins_eval_data)
 ```
 
 There are few fields, which have missing values, which we'll investigate in greater details later.     
 
-
+\newpage
 # Data Preparation of insurance-evaluation-data.csv.      
 
 At this stage, We'll explore and prepare iteratively. First we'll convert the fields, which are supposed to be numeric, into proper numeric format and strings into string format. After reformatting, we'll check for NA. After that if required, we'll impute them.     
 
 After that we'll show some boxplots of the numeric fields.       
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_eval_format <- Ins_eval_data[-1]
 
 Ins_eval_format$INCOME <- as.numeric(gsub('[$,]', '', Ins_eval_format$INCOME))
@@ -322,44 +323,44 @@ Ins_eval_format$URBANICITY  <- gsub("z_", "", Ins_eval_format$URBANICITY)
 
 Checking for NA.    
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 any(is.na(Ins_eval_format))
 ```
 
 NA does exist. So, we'll impute with mice().     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_eval_imputed <- mice(Ins_eval_format, m = 1, method = "pmm", print = F) %>% complete()
 ```
 
 Rechecking for NA after imputation.    
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 any(is.na(subset(Ins_eval_imputed, select = -c(TARGET_FLAG, TARGET_AMT))))
 ```
 
 We observe that NA were removed in all columns except TARGET_FLAG and TARGET_AMT, which is what we want. In the following, we'll visualize with missmap().        
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_eval_imputed %>% missmap(main = "Missing / Observed")
 ```
 
 Both is.na() and missmap() confirm that NA were eliminated.    
 
 
-
+\newpage
 # More Data exploration of insurance-evaluation-data.csv.       
 
 Now, we'll explore the data a little further. First, we'll take a quick look at min, 1st quartile, median, mean, 2nd quartile, max etc.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 summary(Ins_eval_imputed) %>% kable
 ```
 
 ## Data reordering      
 For downstream analysis, we'll reorder the columns into categorical, numeric and target.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 indx <- c(8, 10:13, 15, 18:19, 22, 25, 3:7, 9, 14, 16:17, 20:21, 23:24, 1:2)
 
 Ins_eval_ordered <- Ins_eval_imputed
@@ -370,7 +371,7 @@ setcolorder(Ins_eval_ordered, indx)
 ## Boxplots     
 Let's take a first look at the boxplots      
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 par(mfrow = c(3, 3))
 for(i in 11:23) {
 	if (is.numeric(Ins_eval_ordered[,i])) {
@@ -381,7 +382,7 @@ for(i in 11:23) {
 
 The boxplots show that some of the variables have outliers in them. So, we'll cap them.      
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_eval_cap <- Ins_eval_ordered
 
 for (i in 11:23) {
@@ -394,7 +395,7 @@ for (i in 11:23) {
 }
 ```
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 par(mfrow = c(3, 3))
 for(i in 11:23) {
 	if (is.numeric(Ins_eval_cap[,i])) {
@@ -412,14 +413,14 @@ We'll do the boxplots differently, with gglplot, to check if there are any diffe
 ## Histograms
 Histograms tell us how the data is distributed in the dataset (numeric fields).    
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 multi.hist(Ins_eval_cap[11:18])
 multi.hist(Ins_eval_cap[19:23])
 ```
 
 The histograms show that AGE, YOJ, HOME_VAL, TRAVTIME, BLUEBOOK and CAR_AGE are approximately normally distributed. HOME_VALUE, CAR_AGE and CLM_FREQ are quite dispersed.     
 
-
+\newpage
 ## Categorical variables     
 Now, we'll explore the Categorical variables.    
 
@@ -457,28 +458,28 @@ table(Ins_eval_cap$URBANICITY)
 
 Observation: In JOB columns, 139 rows are empty. So, we' have to'll impute them with "Unknown".         
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_eval_cap_imputed <- Ins_eval_cap %>% mutate(JOB = ifelse((JOB == ""), "Unknown", JOB))
 
 cat("JOB:")
 table(Ins_eval_cap_imputed$JOB)
 ```
 
-
+\newpage
 ## Correlations.    
 
 At this point the data is prepared. So, we'll explore the top correlated variables.      
 
 There are 25 variables, among which 15 are numeric and 10 are non-categorical. In order to find pai-wise correlations, we'll give numerical values to the correlated variables.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Ins_eval_cap_imputed_sub <- subset(Ins_eval_cap_imputed, select = -c(TARGET_FLAG, TARGET_AMT))
 Ins_eval_corr <- data.frame(lapply(Ins_eval_cap_imputed_sub, function(x) as.numeric(as.factor(x))))  # converting the categorical values to numeric
 ```
 
 Now, we'll look at the correlation matrix of the variables.      
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 cor_mx = cor(Ins_eval_corr, use="pairwise.complete.obs", method = "pearson")
 
 corrplot(cor_mx, method = "color",type = "upper", order = "original", number.cex = .7, addCoef.col = "black",   #Add coefficient of correlation
@@ -487,13 +488,19 @@ corrplot(cor_mx, method = "color",type = "upper", order = "original", number.cex
                             tl.cex = 0.5)
 ```
 
-At this point exploration, preparation and pair-wise correlations of insurance_evaluation_data.csv are done. So, I’ll begin the building process.     
+At this point exploration, preparation and pair-wise correlations of insurance_evaluation_data.csv are done. So, We’ll begin the model building process.     
 
+\newpage
 
 # Building Models
-  
 
-```{r}
+Now, we are ready to build models. We will build model using **insurance_training_data.csv** and compare the models. Then we will use the best model to predict on **insurance-evaluation-data.csv**
+
+Our task is to classify the TARGET_FLAG variable using logistic regression and predict the value of TARGET_AMT using Linear Regression.  
+
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
 set.seed(123)
 split_index <- createDataPartition(Ins_train_cap_imputed$TARGET_FLAG, p = 0.8, list = F)
 
@@ -502,13 +509,13 @@ Ins_train_cap_imputed_trn <- Ins_train_cap_imputed[split_index,]
 Ins_train_cap_imputed_tst <- Ins_train_cap_imputed[-split_index,]
 ```
 
-The training and test datasets formed by splitting Ins_train_cap_imputed in 80/20 ratio are **Ins_train_cap_imputed_trn** and **Ins_train_cap_imputed_tst**.     
+We split Ins_train_cap_imputed into training and test in 80/20 ratio and named as **Ins_train_cap_imputed_trn** and **Ins_train_cap_imputed_tst**.     
 
 ## Logistic Regression Model      
 
-We'll build our first Logistic Regression model  
+Here we will build our first logistic regression model
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model01_Log_Reg <- glm(TARGET_FLAG ~.-TARGET_AMT, data = Ins_train_cap_imputed_trn, family = binomial)
 
 summary(Model01_Log_Reg)
@@ -518,15 +525,15 @@ summary(Model01_Log_Reg)
 
 Now, we'll predict on the test set **Ins_train_cap_imputed_tst**.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model01_Log_Reg_pred <- predict(Model01_Log_Reg, Ins_train_cap_imputed_tst, type = "response")
 Model01_Log_Reg_class <- ifelse(Model01_Log_Reg_pred >= 0.5, 1, 0)
 ```
 
+\newpage
+Let's look at the Confusion Matrix.     
 
-Creation of Confusion Matrix.     
-
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 probability_class <- factor(Model01_Log_Reg_class, levels = c(1, 0))
 actual_class <- factor(Ins_train_cap_imputed_tst$TARGET_FLAG, levels = c(1, 0))
 confusionMatrix(probability_class, actual_class)
@@ -534,7 +541,7 @@ confusionMatrix(probability_class, actual_class)
 
 Plotting the AUC under roc curve.   
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 plot(roc(Ins_train_cap_imputed_tst$TARGET_FLAG, Model01_Log_Reg_pred), print.auc = TRUE)
 ```
 
@@ -545,12 +552,12 @@ plot(roc(Ins_train_cap_imputed_tst$TARGET_FLAG, Model01_Log_Reg_pred), print.auc
 **AUC of the model is 0.801.**       
 
 
-
+\newpage
 ## Logistic Regression Model      
 
 We'll build our second Logistic Regression model     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model02_Log_Reg <- glm(TARGET_FLAG ~ KIDSDRIV + HOMEKIDS + INCOME + PARENT1 + HOME_VAL + MSTATUS + EDUCATION + TRAVTIME + CAR_USE + BLUEBOOK + TIF + CAR_TYPE + CLM_FREQ + REVOKED + MVR_PTS + CAR_AGE + URBANICITY, data = Ins_train_cap_imputed_trn, family = binomial)
 
 summary(Model02_Log_Reg)
@@ -560,14 +567,14 @@ summary(Model02_Log_Reg)
 
 Now, we'll predict on the test set **Ins_train_cap_imputed_tst**.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model02_Log_Reg_pred <- predict(Model02_Log_Reg, Ins_train_cap_imputed_tst, type = "response")
 Model02_Log_Reg_class <- ifelse(Model02_Log_Reg_pred >= 0.5, 1, 0)
 ```
 
-Creation of Confusion Matrix.     
+Let's look at the Confusion Matrix.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 probability_class <- factor(Model02_Log_Reg_class, levels = c(1, 0))
 actual_class <- factor(Ins_train_cap_imputed_tst$TARGET_FLAG, levels = c(1, 0))
 confusionMatrix(probability_class, actual_class)
@@ -575,7 +582,7 @@ confusionMatrix(probability_class, actual_class)
 
 Plotting the AUC under roc curve.   
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 plot(roc(Ins_train_cap_imputed_tst$TARGET_FLAG, Model02_Log_Reg_pred), print.auc = TRUE)
 ```
 
@@ -588,12 +595,12 @@ plot(roc(Ins_train_cap_imputed_tst$TARGET_FLAG, Model02_Log_Reg_pred), print.auc
 
 
 
-
+\newpage
 ## Logistic Regression Model      
 
 In the third Logistic Regression model, we'll do stepwise model selection.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 
 Model03_Log_Reg <- Model02_Log_Reg %>% stepAIC(trace = F)
 
@@ -604,14 +611,14 @@ summary(Model03_Log_Reg)
 
 Now, we'll predict on the test set **Ins_train_cap_imputed_tst**.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model03_Log_Reg_pred <- predict(Model03_Log_Reg, Ins_train_cap_imputed_tst, type = "response")
 Model03_Log_Reg_class <- ifelse(Model03_Log_Reg_pred >= 0.5, 1, 0)
 ```
 
 Creation of Confusion Matrix.     
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 probability_class <- factor(Model03_Log_Reg_class, levels = c(1, 0))
 actual_class <- factor(Ins_train_cap_imputed_tst$TARGET_FLAG, levels = c(1, 0))
 confusionMatrix(probability_class, actual_class)
@@ -619,7 +626,7 @@ confusionMatrix(probability_class, actual_class)
 
 Plotting the AUC under roc curve.   
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 plot(roc(Ins_train_cap_imputed_tst$TARGET_FLAG, Model03_Log_Reg_pred), print.auc = TRUE)
 ```
 
@@ -629,17 +636,17 @@ plot(roc(Ins_train_cap_imputed_tst$TARGET_FLAG, Model03_Log_Reg_pred), print.auc
 
 **AUC of the model is 0.802.**      
 
-At this point three Logistic Regression models were built. The accuracy was highest in the third model **Model03_Log_Reg**. We'll use this model on the evaluation dataset, for classification.      
+At this point three Logistic Regression models were built. The accuracy was highest in the third model. We will use the third model on evaluation dataset, for classification.
 
 
-
+\newpage
 ## Linear Regression model    
 
 First Linear Regression model      
 
-Since our goal is to predict the TARGET_AMT, and not classify (as we did in Logistic Regression), we'll build lm for TARGET_AMT.        
+Since our goal is to predict the TARGET_AMT, and not classify (as we did in Logistic Regression), we'll build linear regression model for TARGET_AMT.        
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model01_Lin_Reg <- lm(TARGET_AMT ~. -TARGET_FLAG,  data = Ins_train_cap_imputed)
 
 summary(Model01_Lin_Reg)
@@ -653,16 +660,16 @@ summary(Model01_Lin_Reg)
 
 The R-squared values are far from 1. So, the model is not good. In below plot, the points are widely scattered, but not linearly.        
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 plot(Model01_Lin_Reg)
 ```
 
-
+\newpage
 ## Linear Regression model     
 
-In Second Linear Regression model Model02_Lin_Reg, we'll do stepwise AIC.        
+In Second Linear Regression model, we'll do stepwise AIC.        
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 Model02_Lin_Reg <- Model01_Lin_Reg %>% stepAIC(trace = F)
 
 summary(Model02_Lin_Reg)
@@ -674,10 +681,44 @@ summary(Model02_Lin_Reg)
 
 **Adjusted R-squared:  0.06692.**      
 
-The second model Model02_Lin_Reg marginally improved over the first model Model01_Lin_Reg. The plot also suggest no proper linear regression.       
+The second model slightly improved over the first model. The plot also suggest no proper linear regression.       
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo = F}
 plot(Model02_Lin_Reg)
 ```
 
+
+\newpage
+# Model Selection.       
+
+We ran three Logistic Regression models and two Linear Regression models. The third Logistic Regression model did best based on the Accuracy and AUC. And the second Linear Regression model did best based on R-squared value. 
+
+We'll use these models to predict the evaluation dataset **insurance-evaluation-data.csv**.
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+Eval_Log_Reg_pred <- predict(Model03_Log_Reg, Ins_eval_cap_imputed, type = "response")
+
+Eval_Log_Reg_class <- ifelse(Eval_Log_Reg_pred >= 0.5, 1, 0)
+
+Eval_TARGET_AMT <- ifelse(Eval_Log_Reg_class == 1, predict(Model02_Lin_Reg, Ins_eval_cap_imputed, type = "response"), 0)
+```
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+Ins_eval_cap_imputed$TARGET_FLAG <- Eval_Log_Reg_class 
+
+Ins_eval_cap_imputed$TARGET_AMT <- Eval_TARGET_AMT  
+```
+
+Head of the predicted data.    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+head(Ins_eval_cap_imputed)
+```
+
+# Write the data to a CSV file    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+write.csv(Ins_eval_cap_imputed,file="Insurance_pred.csv")
+```
 
