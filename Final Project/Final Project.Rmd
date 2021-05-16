@@ -1,0 +1,275 @@
+---
+title: "Final Project"
+author: "Forhad Akbar"
+date: '2021-05-15'
+output: rmdformats::readthedown
+
+---
+
+```{r setup, include=FALSE, message=FALSE, warnings=FALSE}
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width = 12, fig.height = 8) 
+```
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+# loading libraries
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(kableExtra)
+library(knitr)
+library(ggcorrplot)
+library(car)
+library(MASS)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(pROC)
+library(pscl)
+library(psych)
+library(data.table)
+library(stringr)
+library(mice)
+library(Amelia)
+library(gridExtra)
+library(corrgram)
+library(Hmisc)
+library(corrplot)
+library(RColorBrewer)
+library(glmulti)
+```
+
+
+\newpage
+# Overview 
+
+ 
+
+
+# Data Exploration
+
+We will load the data as the first step in the data exploration.
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+load_chi2018 <- function() {
+  
+
+  df = read.csv("https://raw.githubusercontent.com/davidblumenstiel/CUNY-MSDS-DATA-621/main/Final_Project/chi-2018.csv")
+  
+  
+  x1 = df %>%
+    pivot_longer(
+      cols = starts_with("wat_"), 
+      names_to = "Year",
+      names_prefix = "wat_",
+      values_to = "water_score"
+    ) %>% 
+    dplyr::select("Year", "water_score", "CountryName")
+  
+  
+  x2 = df %>%
+    pivot_longer(
+      cols = starts_with("san_"), 
+      names_to = "Year",
+      names_prefix = "san_",
+      values_to = "sanitation_score"
+    ) %>% 
+   dplyr::select("Year", "sanitation_score", "CountryName")
+  
+  x3 = df %>%
+    pivot_longer(
+      cols = starts_with("chmort_"), 
+      names_to = "Year",
+      names_prefix = "chmort_",
+      values_to = "child_mortality"
+    ) %>% 
+    dplyr::select("Year", "child_mortality", "CountryName")
+  
+  
+    
+  x4 = df %>%
+    pivot_longer(
+      cols = starts_with("mortality_"), 
+      names_to = "Year",
+      names_prefix = "mortality_",
+      values_to = "mortality_score"
+    ) %>% 
+    dplyr::select("Year", "mortality_score", "CountryName")
+    
+  x5 = df %>%
+    pivot_longer(
+      cols = starts_with("CHI_v2018_"), 
+      names_to = "Year",
+      names_prefix = "CHI_v2018_",
+      values_to = "CHI_v2018"
+    ) %>% 
+    dplyr::select("Year", "CHI_v2018", "CountryName")
+  
+  out = x1 %>% merge(x2, by = c("CountryName", "Year")) %>%
+    merge(x3, by = c("CountryName", "Year")) #%>%
+   # merge(x4, by = c("CountryName", "Year")) %>%
+   # merge(x5, by = c("CountryName", "Year")) 
+}
+df <- load_chi2018()
+```
+
+```{r}
+head(df)
+```
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+dim1 <- dim(df)
+print(paste0('Dimension of training set:   ', 'Number of rows: ', dim1[1], ', ', 'Number of cols: ', dim1[2]))
+```
+```{r, message = FALSE, warning = FALSE, echo = F}
+print('Structure of training data set:')
+str(df)
+```
+
+
+Checking for NA.    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+any(is.na(df))
+```
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+missmap(df, main="Missing Values") # using Amelia package
+```
+
+There are NA in our data, We will impute NA using mice().
+
+    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+df_imputed <- mice(df, m = 1, method = "pmm", print = F) %>% complete()
+```
+
+Rechecking for NA after imputation.    
+
+}
+```{r, message = FALSE, warning = FALSE, echo = F}
+missmap(df_imputed, main="Missing Values") # using Amelia package
+```
+
+
+We observe that NA were removed.      
+
+
+Here, We'll further explore the data. First, We'll look at min, 1st quartile, median, mean, 2nd quartile, max etc.     
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+summary(df_imputed) %>% kable
+```
+
+
+## Boxplots       
+
+First look at the boxplots.      
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+par(mfrow = c(3, 3))
+for(i in 3:5) {
+	if (is.numeric(df_imputed[,i])) {
+	  boxplot(df_imputed[,i], main = names(df_imputed[i]), col = 4, horizontal = TRUE)
+   }
+}
+```
+
+
+
+## Histograms       
+
+We will see how the  data is distributed (numeric fields) using histrogram.    
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+multi.hist(df_imputed[3:5])
+```
+
+
+
+
+## Correlations    
+
+
+
+Now, we'll look at the correlation matrix of the variables.      
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+cor_mx = cor(df_imputed[3:5], use = "pairwise.complete.obs", method = "pearson")
+
+corrplot(cor_mx, method = "color", type = "upper", order = "original", number.cex = .7, addCoef.col = "black",   #Add coefficient of correlation
+                            tl.srt = 90,  # Text label color and rotation
+                            diag = TRUE,  # hide correlation coefficient on the principal diagonal
+                            tl.cex = 0.5)
+```
+
+
+
+
+
+
+# Building Models
+
+Now, we are ready to build models. We will build model using **df_imputed** and compare the models. Then we will use the best model to predict child mortality.
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+set.seed(123)
+split_index <- createDataPartition(df_imputed$child_mortality, p = 0.8, list = F)
+
+df_imputed_trn <- df_imputed[split_index,]
+
+df_imputed_tst <- df_imputed[-split_index,]
+```
+
+We split df_imputed into training and test in 80/20 ratio and named as **df_imputed_trn** and **df_imputed_tst**.     
+
+
+## Linear Regression model    
+
+First Linear Regression model      
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+Model01_Lin_Reg <- lm(child_mortality ~. ,  data = df_imputed_trn)
+
+summary(Model01_Lin_Reg)
+```
+
+**Here we note the following important metrics.**       
+
+**R-squared:  0.9851**      
+
+**Adjusted R-squared:  0.9826**      
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+plot(Model01_Lin_Reg)
+```
+
+
+## Linear Regression model     
+
+In Second Linear Regression model, we'll do stepwise AIC.        
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+Model02_Lin_Reg <- Model01_Lin_Reg %>% stepAIC(trace = F)
+
+summary(Model02_Lin_Reg)
+```
+
+**Here we note the following important metrics.**       
+
+**R-squared:  0.9851**      
+
+**Adjusted R-squared:  0.9826 **      
+
+
+```{r, message = FALSE, warning = FALSE, echo = F}
+plot(Model02_Lin_Reg)
+```
+
+
